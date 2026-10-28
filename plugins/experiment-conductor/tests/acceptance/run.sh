@@ -12,6 +12,7 @@ set -u
 usage() {
   cat <<'EOF'
 Usage: sh run.sh (--local | --partition NAME) [--model MODEL] [--workdir DIR]
+       sh run.sh --check-only DIR
 
   --local           run jobs as plain processes on this machine
   --partition NAME  submit jobs to this SLURM partition
@@ -19,9 +20,12 @@ Usage: sh run.sh (--local | --partition NAME) [--model MODEL] [--workdir DIR]
   --workdir DIR     new or empty directory for the run (default: a new
                     ec-acceptance.XXXXXX in the current directory; on SLURM
                     it must be on a filesystem the compute nodes can read)
+  --check-only DIR  run only the checks against the finished work directory
+                    DIR (its repo and logs), without starting any agent
 
 Exit status: 0 when every check passes, 1 when a check fails, 2 when the
-run itself could not be carried out.
+run itself could not be carried out, including when an agent's tool call was
+denied by the permission mode.
 EOF
 }
 
@@ -31,7 +35,7 @@ here=$(cd "$(dirname "$0")" && pwd)
 plugin=$(cd "$here/../.." && pwd)
 prompts=$here/prompts.txt
 
-mode= partition= model= workdir=
+mode= partition= model= workdir= checkonly=
 while [ $# -gt 0 ]; do
   case $1 in
     --local) mode=local ;;
@@ -41,16 +45,22 @@ while [ $# -gt 0 ]; do
     --model=*) model=${1#*=} ;;
     --workdir) [ $# -ge 2 ] || die "--workdir needs a value"; workdir=$2; shift ;;
     --workdir=*) workdir=${1#*=} ;;
+    --check-only) [ $# -ge 2 ] || die "--check-only needs a value"; checkonly=$2; shift ;;
+    --check-only=*) checkonly=${1#*=} ;;
     -h | --help) usage; exit 0 ;;
     *) usage >&2; die "unknown argument: $1" ;;
   esac
   shift
 done
+if [ -n "$checkonly" ]; then
+  [ -d "$checkonly/repo" ] && [ -d "$checkonly/logs" ] || die "$checkonly has no repo and logs"
+  [ -n "$mode" ] || mode=local
+fi
 [ -n "$mode" ] || { usage >&2; exit 2; }
 [ "$mode" = local ] || [ -n "$partition" ] || die "--partition needs a value"
-command -v claude >/dev/null 2>&1 || die "claude is not on PATH"
+[ -n "$checkonly" ] || command -v claude >/dev/null 2>&1 || die "claude is not on PATH"
 command -v git >/dev/null 2>&1 || die "git is not on PATH"
-if [ "$mode" = slurm ]; then
+if [ "$mode" = slurm ] && [ -z "$checkonly" ]; then
   for t in sbatch squeue sacct; do
     command -v "$t" >/dev/null 2>&1 || die "$t is not on PATH"
   done
@@ -60,7 +70,9 @@ fi
 # Per-role time limits in seconds.
 t_propose=600 t_run=900 t_continue=1500 t_report=600 t_guard=240
 
-if [ -n "$workdir" ]; then
+if [ -n "$checkonly" ]; then
+  work=$(cd "$checkonly" && pwd)
+elif [ -n "$workdir" ]; then
   mkdir -p "$workdir" || die "cannot create $workdir"
   [ -z "$(ls -A "$workdir")" ] || die "$workdir is not empty"
   work=$(cd "$workdir" && pwd)
@@ -72,6 +84,7 @@ logs=$work/logs
 results=$work/results.txt
 mkdir -p "$repo" "$logs" || die "cannot create $repo"
 : >"$results"
+denied=
 started=$(date +%s)
 
 say() { echo "[$(date '+%H:%M:%S')] $*"; }
@@ -79,6 +92,7 @@ result() { printf '%s\t%s\t%s\n' "$1" "$2" "$3" >>"$results"; }
 
 # ---------------------------------------------------------------- scratch repo
 
+if [ -z "$checkonly" ]; then
 say "work directory $work"
 git -C "$repo" init -q -b main 2>/dev/null || {
   git -C "$repo" init -q && git -C "$repo" symbolic-ref HEAD refs/heads/main
@@ -137,7 +151,9 @@ cat >"$repo/bin/with-limit" <<'EOF'
 # command, prints a message to stderr and exits 124; otherwise it exits with
 # the command's status.
 limit=$1; shift
-mark=$(mktemp "${TMPDIR:-/tmp}/with-limit.XXXXXX") || exit 125
+dir=$(dirname "$0")/../logs
+mkdir -p "$dir" || exit 125
+mark=$(mktemp "$dir/with-limit.XXXXXX") || exit 125
 "$@" &
 child=$!
 (
@@ -167,6 +183,7 @@ printf 'runs/\nlogs/\n' >"$repo/.gitignore"
 git -C "$repo" add README.md .gitignore train.sh bin/with-limit || die "git add failed"
 git -C "$repo" commit -q -m "initial commit" || die "initial commit failed"
 initial=$(git -C "$repo" rev-parse HEAD)
+fi
 
 # ------------------------------------------------------------------- helpers
 
@@ -289,24 +306,80 @@ run_role() {
 
 # ------------------------------------------------------------------ the loop
 
-run_role 1-researcher-propose researcher "$t_propose" propose
+if [ -z "$checkonly" ]; then
+  run_role 1-researcher-propose researcher "$t_propose" propose
+fi
 branch=$(git -C "$repo" for-each-ref --format='%(refname:short)' 'refs/heads/exp/*-acceptance' | head -n 1)
 [ -n "$branch" ] || { say "no batch branch exp/<date>-acceptance was created"; }
 batch=${branch#exp/}
 
-run_role 2-executor-run executor "$t_run" run mid_batch
-exec1_end=$role_end
-set -- $(counts)
-open_at_stop=$2
-say "first Executor ended ($exec1_end) with $1 records done and $2 open"
+if [ -z "$checkonly" ]; then
+  run_role 2-executor-run executor "$t_run" run mid_batch
+  exec1_end=$role_end
+  set -- $(counts)
+  open_at_stop=$2
+  say "first Executor ended ($exec1_end) with $1 records done and $2 open"
+  printf 'exec1_end=%s\nopen_at_stop=%s\n' "$exec1_end" "$open_at_stop" >"$work/state.txt"
 
-run_role 3-executor-continue executor "$t_continue" continue
-run_role 4-researcher-report researcher "$t_report" report
+  run_role 3-executor-continue executor "$t_continue" continue
+  run_role 4-researcher-report researcher "$t_report" report
+else
+  initial=$(git -C "$repo" rev-list --max-parents=0 main | head -n 1)
+  exec1_end=$(sed -n 's/^exec1_end=//p' "$work/state.txt" 2>/dev/null)
+  open_at_stop=$(sed -n 's/^open_at_stop=//p' "$work/state.txt" 2>/dev/null)
+  if [ -z "$exec1_end" ]; then
+    # A role that was stopped has no final result message in its transcript.
+    if grep -q '"type":"result"' "$logs/2-executor-run.jsonl" 2>/dev/null; then exec1_end=done; else exec1_end=stopped; fi
+    open_at_stop=unknown
+  fi
+fi
+
+# Permission denials. The final result message of each transcript lists the
+# tool calls the permission mode refused. In the guard role a refused git
+# command is the hook doing its job, so those are not counted.
+denials() {  # log, role
+  awk -v role="$2" '
+  function str(s, key,   i, c, out) {
+    i = index(s, key); if (i == 0) return ""
+    s = substr(s, i + length(key)); out = ""
+    while (length(s) > 0) {
+      c = substr(s, 1, 1)
+      if (c == "\\") { out = out substr(s, 1, 2); s = substr(s, 3); continue }
+      if (c == "\"") break
+      out = out c; s = substr(s, 2)
+    }
+    return out
+  }
+  {
+    i = index($0, "\"permission_denials\":[{")
+    if (i == 0) next
+    rest = substr($0, i + 1)
+    n = split(rest, chunk, "\"tool_name\":\"")
+    for (k = 2; k <= n; k++) {
+      tool = substr(chunk[k], 1, index(chunk[k], "\"") - 1)
+      what = str(chunk[k], "\"command\":\"")
+      if (what == "") what = str(chunk[k], "\"file_path\":\"")
+      if (role == "guard" && what ~ /^git .*(commit|switch|checkout|branch)/) continue
+      gsub(/\\n/, " ", what)
+      if (length(what) > 100) what = substr(what, 1, 100) "..."
+      print tool ": " what
+    }
+  }' "$1"
+}
+scan_denials() {
+  for role in 1-researcher-propose:propose 2-executor-run:run 3-executor-continue:continue 4-researcher-report:report 5-executor-guard:guard; do
+    [ -f "$logs/${role%%:*}.jsonl" ] || continue
+    d=$(denials "$logs/${role%%:*}.jsonl" "${role##*:}" | head -n 3)
+    [ -z "$d" ] || denied="$denied
+${role%%:*} was denied: $(printf '%s' "$d" | tr '\n' ';')"
+  done
+}
 
 # ------------------------------------------------------------------ checks
 
 dir=lab/$batch
 final=$work/final
+rm -rf "$final"
 mkdir -p "$final"
 ids="E001 E002 E003 E004"
 
@@ -325,10 +398,11 @@ else
 fi
 
 # 2-5. Attempt lines: fields, commits, provenance files, jobs.
-bad_fields= bad_sha= bad_prov= bad_jobs= nattempts=0
+bad_fields= bad_sha= bad_run= bad_prov= bad_jobs= bad_job= nattempts=0 nrec=0
 for id in $ids; do
   f=$final/$id.md
   [ -f "$f" ] || continue
+  nrec=$((nrec + 1))
   list=
   n=0
   attempts "$f" >"$final/$id.attempts"
@@ -337,7 +411,22 @@ for id in $ids; do
     c=$(afield "$line" commit) j=$(afield "$line" job) r=$(afield "$line" run) pv=$(afield "$line" provenance)
     if [ -z "$c" ] || [ -z "$j" ] || [ -z "$r" ] || [ -z "$pv" ]; then bad_fields="$bad_fields $id#$n"; fi
     sha=${c%% *}
-    if [ -z "$sha" ] || ! git -C "$repo" cat-file -e "$sha^{commit}" 2>/dev/null; then bad_sha="$bad_sha $id#$n"; fi
+    # A hex SHA of 7 to 40 characters that is a commit on the batch branch.
+    if ! printf '%s\n' "$sha" | grep -Eq '^[0-9a-f]{7,40}$' \
+      || ! git -C "$repo" cat-file -e "$sha^{commit}" 2>/dev/null \
+      || ! git -C "$repo" merge-base --is-ancestor "$sha" "$branch" 2>/dev/null; then bad_sha="$bad_sha $id#$n($sha)"; fi
+    rd=${r%% *}
+    case $rd in
+      /*) [ -e "$rd" ] || bad_run="$bad_run $id#$n($rd)" ;;
+      '') bad_run="$bad_run $id#$n" ;;
+      *) [ -e "$repo/$rd" ] || bad_run="$bad_run $id#$n($rd)" ;;
+    esac
+    jd=${j%% *}
+    if [ "$mode" = slurm ]; then
+      case $jd in '' | *[!0-9]*) bad_job="$bad_job $id#$n($jd)" ;; esac
+    else
+      case $jd in local) ;; '' | *[!0-9]*) bad_job="$bad_job $id#$n($jd)" ;; esac
+    fi
     if [ -z "$pv" ] || [ ! -f "$repo/$pv" ]; then bad_prov="$bad_prov $id#$n"; fi
     list=$list${list:+,}$j
   done <"$final/$id.attempts"
@@ -346,17 +435,19 @@ for id in $ids; do
   jobs=$(fm "$f" jobs | sed 's/^\[//; s/\]$//' | tr -d "\"' ")
   [ "$jobs" = "$list" ] || bad_jobs="$bad_jobs $id(jobs=[$jobs],attempts=[$list])"
 done
-if [ -f "$final/E001.md" ]; then
+if [ "$nrec" -ge 1 ] && [ "$nattempts" -ge 1 ]; then
   [ -z "$bad_fields" ] && result attempt-fields PASS "$nattempts attempt lines with commit, job, run, provenance" \
     || result attempt-fields FAIL "missing a field or attempt:$bad_fields"
-  [ -z "$bad_sha" ] && result attempt-commits PASS "every commit SHA resolves in the repo" \
-    || result attempt-commits FAIL "unknown commit in$bad_sha"
+  [ -z "$bad_sha" ] && result attempt-commits PASS "every commit is a hex SHA on the batch branch" \
+    || result attempt-commits FAIL "not a hex SHA of a branch commit in$bad_sha"
+  [ -z "$bad_run$bad_job" ] && result run-and-job PASS "every run directory exists and every job id is valid" \
+    || result run-and-job FAIL "bad run directory in:${bad_run:- none}; bad job id in:${bad_job:- none}"
   [ -z "$bad_prov" ] && result provenance-files PASS "every provenance file exists" \
     || result provenance-files FAIL "missing provenance file in$bad_prov"
   [ -z "$bad_jobs" ] && result jobs-match PASS "jobs equals the attempt job ids in every record" \
     || result jobs-match FAIL "$bad_jobs"
 else
-  for c in attempt-fields attempt-commits provenance-files jobs-match; do result "$c" FAIL "no records"; done
+  for c in attempt-fields attempt-commits run-and-job provenance-files jobs-match; do result "$c" FAIL "no records"; done
 fi
 
 # 6. depends_on: E002 starts after E001 is done, in git order and attempt time.
@@ -370,7 +461,7 @@ first_index() {  # record path, condition (done | attempt)
   done
   echo 0
 }
-if [ -f "$final/E001.md" ] && [ -f "$final/E002.md" ]; then
+if [ "$nattempts" -ge 1 ] && [ -f "$final/E001.md" ] && [ -f "$final/E002.md" ]; then
   p1=$(git -C "$repo" ls-tree --name-only "$branch" "$dir/" | grep '/E001-')
   p2=$(git -C "$repo" ls-tree --name-only "$branch" "$dir/" | grep '/E002-')
   d1=$(first_index "$p1" done) a2=$(first_index "$p2" attempt)
@@ -387,7 +478,7 @@ else
 fi
 
 # 7. The job that fails by design ends failed or needs-decision.
-if [ -f "$final/E003.md" ]; then
+if [ "$nattempts" -ge 1 ] && [ -f "$final/E003.md" ]; then
   s=$(fm "$final/E003.md" status) n=$(grep -c . "$final/E003.attempts")
   case $s in
     failed | needs-decision) [ "$n" -ge 1 ] && result failure PASS "E003 $s after $n attempts" || result failure FAIL "E003 $s without attempts" ;;
@@ -396,10 +487,13 @@ if [ -f "$final/E003.md" ]; then
 else result failure FAIL "no E003 record"; fi
 
 # 8. The job that times out once has two attempts and ends done.
-if [ -f "$final/E004.md" ]; then
+if [ "$nattempts" -ge 1 ] && [ -f "$final/E004.md" ]; then
   s=$(fm "$final/E004.md" status) n=$(grep -c . "$final/E004.attempts")
-  if [ "$n" -ge 2 ] && [ "$s" = done ]; then result timeout-retry PASS "E004 done after $n attempts"
-  else result timeout-retry FAIL "E004 status $s after $n attempts"; fi
+  # The outcome is the seventh field of an attempt line.
+  out1=$(grep . "$final/E004.attempts" | head -n 1 | awk -F ' [|] ' '{ for (i = 7; i <= NF; i++) printf "%s ", $i }')
+  if [ "$n" -ge 2 ] && [ "$s" = done ] && printf '%s\n' "$out1" | grep -Eiq 'timeout|timed out|time limit|wall.?time'; then
+    result timeout-retry PASS "E004 done after $n attempts, the first ended in a timeout"
+  else result timeout-retry FAIL "E004 status $s after $n attempts, first outcome: ${out1:-none}"; fi
 else result timeout-retry FAIL "no E004 record"; fi
 
 # 9. The first Executor was stopped mid-batch and the second finished it.
@@ -436,18 +530,23 @@ for id in $ids; do
   [ "$(fm "$final/$id.md" status)" = done ] || continue
   case $(fm "$final/$id.md" review) in supported | refuted | inconclusive) ;; *) noverdict="$noverdict $id" ;; esac
 done
-if [ ! -f "$final/E001.md" ]; then result verdicts FAIL "no records"
+if [ "$nrec" -lt 1 ] || [ "$nattempts" -lt 1 ]; then result verdicts FAIL "no records"
 elif [ -z "$noverdict" ]; then result verdicts PASS "every done record has a review verdict"
 else result verdicts FAIL "no verdict:$noverdict"; fi
 
 # 12. The batch README.md holds the report sections in order.
-if [ -f "$final/README.md" ]; then
+if [ "$nrec" -lt 1 ] || [ "$nattempts" -lt 1 ]; then result report FAIL "no records to report on"
+elif [ -f "$final/README.md" ]; then
   order=$(awk '
   BEGIN { n = split("tl;dr|what was tested|results|verdicts with evidence|surprises and defects|open questions|next experiments", want, "|") }
   /^#+[ \t]/ {
+    lv = match($0, /^#+/) ? RLENGTH : 0
+    if (cur && lv <= curlv) cur = 0
     h = tolower($0); sub(/^#+[ \t]+/, "", h); sub(/[ \t]+$/, "", h)
-    for (i = 1; i <= n; i++) if (index(h, want[i]) == 1 && !(i in at)) at[i] = NR
+    for (i = 1; i <= n; i++) if (index(h, want[i]) == 1 && !(i in at)) { at[i] = NR; cur = i; curlv = lv; break }
+    next
   }
+  cur && $0 ~ /[^ \t]/ { body[cur] = 1 }
   END {
     last = 0
     for (i = 1; i <= n; i++) {
@@ -455,23 +554,41 @@ if [ -f "$final/README.md" ]; then
       if (at[i] < last) { print "out of order " want[i]; exit }
       last = at[i]
     }
+    for (i = 1; i <= n; i++) if (!(i in body)) { print "empty section " want[i]; exit }
     print "ok"
   }' "$final/README.md")
-  [ "$order" = ok ] && result report PASS "all seven report sections in order" || result report FAIL "$order"
+  [ "$order" = ok ] && result report PASS "all seven report sections in order, none empty" || result report FAIL "$order"
 else result report FAIL "no batch README.md"; fi
 
-# 13. An agent asked to commit on main is refused.
-main_before=$(git -C "$repo" rev-parse main)
-if git -C "$repo" checkout -q main 2>/dev/null; then
-  run_role 5-executor-guard executor "$t_guard" guard
+# 13. An agent asked to commit on main is refused by the hook. The check
+# passes only when the transcript shows the hook refusing a git command, so an
+# agent that simply declined to try proves nothing and fails.
+guard_log=$logs/5-executor-guard.jsonl
+if [ -z "$checkonly" ]; then
+  main_before=$(git -C "$repo" rev-parse main)
+  if git -C "$repo" checkout -q main 2>/dev/null; then
+    run_role 5-executor-guard executor "$t_guard" guard
+    [ -n "$branch" ] && git -C "$repo" checkout -q "$branch" 2>/dev/null
+    guard_ran=1
+  else
+    guard_ran=0
+  fi
   main_after=$(git -C "$repo" rev-parse main)
-  if grep -q 'experiment-conductor: blocked git commit' "$logs/5-executor-guard.jsonl"; then how="the hook blocked git commit"
-  elif grep -q '"command":"git commit' "$logs/5-executor-guard.jsonl"; then how="a git commit ran without the hook message"
-  else how="the agent declined without running git commit"; fi
-  [ "$main_after" = "$main_before" ] && result guard PASS "main unchanged; $how" || result guard FAIL "main moved to $main_after; $how"
-  [ -n "$branch" ] && git -C "$repo" checkout -q "$branch" 2>/dev/null
 else
-  result guard FAIL "could not check out main (working tree not clean)"
+  main_before=$initial main_after=$(git -C "$repo" rev-parse main)
+  guard_ran=0
+  [ -f "$guard_log" ] && guard_ran=1
+fi
+if [ "$guard_ran" = 0 ]; then
+  result guard FAIL "no guard run (working tree not clean or no transcript)"
+else
+  if grep -q 'experiment-conductor: blocked git' "$guard_log"; then how=blocked
+  elif grep -Eq '"command":"git [^"]*(commit|switch|checkout)' "$guard_log"; then how=ran
+  else how=declined; fi
+  if [ "$main_after" != "$main_before" ]; then result guard FAIL "main moved to $main_after"
+  elif [ "$how" = blocked ]; then result guard PASS "main unchanged; the hook blocked the git command"
+  elif [ "$how" = ran ]; then result guard FAIL "a git command ran without the hook message"
+  else result guard FAIL "not proven: the agent never tried git commit, so the hook was not exercised"; fi
 fi
 
 # 14. main still holds only its initial commit.
@@ -481,6 +598,8 @@ count=$(git -C "$repo" rev-list --count main)
   || result main-untouched FAIL "main has $count commits"
 
 # ------------------------------------------------------------------ report
+
+scan_denials
 
 elapsed=$(( $(date +%s) - started ))
 echo
@@ -498,6 +617,11 @@ if [ "$mode" = local ]; then
       kill -0 "$j" 2>/dev/null && echo "note: process $j from $id is still running"
     done <"$final/$id.attempts"
   done
+fi
+if [ -n "$denied" ]; then
+  echo
+  echo "HARNESS PROBLEM: the permission mode denied tool calls, so the agents could not do their work (exit 2):$denied"
+  exit 2
 fi
 awk -F '\t' '$2 == "FAIL" { f = 1 } END { exit !f }' "$results" && exit 1
 exit 0
