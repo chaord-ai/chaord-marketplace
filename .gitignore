@@ -15,3 +15,6 @@
 .claude/settings.local.json
 .claude/scheduled_tasks.lock
 .claude/worktrees/
+
+# Generated per machine by Claude Code when a plugin folder is loaded with --plugin-dir
+plugins/*/tsconfig.json

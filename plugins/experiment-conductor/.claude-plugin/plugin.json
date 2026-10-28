@@ -1,0 +1,16 @@
+{
+  "name": "experiment-conductor",
+  "version": "0.1.0",
+  "description": "Researcher and Executor agents that run GPU-cluster experiments with you in the loop, keeping a lab record that survives across sessions.",
+  "author": { "name": "Chaord AI" },
+  "license": "MIT",
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "showPane": {
+      "type": "boolean",
+      "title": "Show the experiments pane",
+      "description": "Open a live pane listing the experiment records under lab/, grouped by batch, when a session starts in a project that has them.",
+      "default": true
+    }
+  }
+}
