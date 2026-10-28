@@ -1,0 +1,17 @@
+# Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Env
+.env
+.env.local
+
+# macOS
+.DS_Store
+
+# Claude Code per-user settings, runtime lock and worktrees
+.claude/settings.local.json
+.claude/scheduled_tasks.lock
+.claude/worktrees/
