@@ -4,16 +4,22 @@
 set -eu
 
 usage() {
-  echo "usage: run-demo.sh [-l PLUGIN_DIR] [-d] PARTITION" >&2
+  echo "usage: run-demo.sh [-b BASE] [-l PLUGIN_DIR] [-m MODE] [-d] PARTITION" >&2
+  echo "  -b BASE        folder that holds the scratch repos (default: \$HOME/ec-demo)" >&2
   echo "  -l PLUGIN_DIR  load the plugin from a local checkout (--plugin-dir)" >&2
+  echo "  -m MODE        pass --permission-mode MODE to both sessions" >&2
   echo "  -d             create the tmux session but do not attach to it" >&2
   exit 2
 }
 
 plugin_dir=""
+base_dir=${HOME:-}/ec-demo
+mode=""
 attach=1
-while getopts "l:dh" opt; do
+while getopts "b:l:m:dh" opt; do
   case $opt in
+    b) base_dir=$OPTARG ;;
+    m) mode=$OPTARG ;;
     l) plugin_dir=$OPTARG ;;
     d) attach=0 ;;
     *) usage ;;
@@ -22,6 +28,21 @@ done
 shift $((OPTIND - 1))
 [ $# -eq 1 ] || usage
 partition=$1
+[ -n "$partition" ] || { echo "error: PARTITION must not be empty" >&2; usage; }
+[ -n "$base_dir" ] || { echo "error: BASE must not be empty" >&2; usage; }
+
+# The generated launchers quote paths with double quotes, so these characters
+# would break them. Spaces are fine.
+check_path() {
+  case $2 in
+    *'"'* | *'$'* | *'`'*)
+      echo "error: $1 must not contain a double quote, a dollar sign or a backtick: $2" >&2
+      exit 2 ;;
+  esac
+}
+check_path BASE "$base_dir"
+check_path PLUGIN_DIR "$plugin_dir"
+check_path MODE "$mode"
 
 command -v tmux >/dev/null 2>&1 || { echo "tmux not found" >&2; exit 1; }
 command -v git >/dev/null 2>&1 || { echo "git not found" >&2; exit 1; }
@@ -29,10 +50,15 @@ claude_bin=${CLAUDE_BIN:-claude}
 
 if [ -n "$plugin_dir" ]; then
   plugin_dir=$(cd "$plugin_dir" && pwd) || exit 1
+  check_path PLUGIN_DIR "$plugin_dir"
 fi
 
-# One fresh folder per run: the scratch repo plus the launcher files.
-base=$(mktemp -d "${TMPDIR:-/tmp}/ec-demo.XXXXXX")
+# One fresh folder per run under BASE, which must be a trusted folder in
+# Claude Code so the sessions start without a trust dialog.
+mkdir -p "$base_dir"
+base_dir=$(cd "$base_dir" && pwd) || exit 1
+check_path BASE "$base_dir"
+base=$(mktemp -d "$base_dir/run.XXXXXX")
 id=${base##*.}
 repo=$base/lab
 launch=$base/launch
@@ -52,7 +78,7 @@ session=ecdemo-$id
 cat > "$launch/researcher.prompt" <<PROMPT
 This is a dry run of the workflow, with no real research. Propose a batch of 5 dummy experiments. Each one is a SLURM job on partition \`$partition\` with 1 CPU and no GPU. It sleeps about 60 seconds and writes a fake metric to its run folder. Make E003 depend on E002. Make E004 fail every time with exit 1, so we can see the failure path.
 
-I approve this dry-run batch now, so you may mark all five records ready yourself without asking me again. When the batch is ready, send a message to the Claude Code session named $e_name to tell it which batch branch to run. Each time that session messages you that an experiment is ready for analysis, analyze it. When all experiments are analyzed, write the batch report.
+I approve every record in this dry-run batch, E-numbers included, so treat this message as my approval of each one and mark them ready yourself. When the batch is ready, send a message to the Claude Code session named $e_name to tell it which batch branch to run. Each time that session messages you that an experiment is ready for analysis, analyze it. When all experiments are analyzed, write the batch report.
 PROMPT
 
 cat > "$launch/executor.prompt" <<PROMPT
@@ -67,6 +93,9 @@ for role in researcher executor; do
     echo "cd \"$repo\""
     printf 'exec "%s" --name "%s" --agent "experiment-conductor:%s"' \
       "$claude_bin" "$name" "$role"
+    if [ -n "$mode" ]; then
+      printf ' --permission-mode "%s"' "$mode"
+    fi
     if [ -n "$plugin_dir" ]; then
       printf ' --plugin-dir "%s"' "$plugin_dir"
     fi
@@ -75,8 +104,8 @@ for role in researcher executor; do
   chmod +x "$launch/$role.sh"
 done
 
-tmux new-session -d -s "$session" -c "$repo" "$launch/researcher.sh"
-tmux split-window -v -t "$session" -c "$repo" "$launch/executor.sh"
+tmux new-session -d -s "$session" -c "$repo" sh "$launch/researcher.sh"
+tmux split-window -v -t "$session" -c "$repo" sh "$launch/executor.sh"
 tmux select-pane -t "$session:0.0"
 
 echo "demo repo: $repo"

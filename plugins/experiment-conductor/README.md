@@ -72,16 +72,19 @@ The `showPane` option, on by default, controls the pane. Turn it off in `/config
 
 ## Demo
 
-The script `demo/run-demo.sh` shows both roles working together without any typing. Run it with the name of a SLURM partition, from any directory.
+The script `demo/run-demo.sh` shows both roles working together without any typing. Run it with the name of a SLURM partition, from any directory. Before the talk, trust the base folder once by starting `claude` in `~/ec-demo` and accepting the trust dialog. Every scratch repository is created inside that folder, so the sessions start without a dialog.
 
 ```
 sh demo/run-demo.sh <partition>
 sh demo/run-demo.sh -l /path/to/chaord-marketplace/plugins/experiment-conductor <partition>
+sh demo/run-demo.sh -b /path/to/base -m auto <partition>
 ```
 
-The first form uses the plugin installed from the marketplace. The second loads a local checkout through `--plugin-dir`. The script creates a fresh scratch git repository in a temporary folder with one commit on `main`, so each run is independent and no existing project is touched. It then opens a tmux session in that repository with two panes stacked vertically, the Researcher on top and the Executor below. Each pane runs `claude --name <name> --agent experiment-conductor:<role>` with its first prompt already submitted. The `-d` option creates the session without attaching to it.
+The first form uses the plugin installed from the marketplace. The second loads a local checkout through `--plugin-dir`. The script creates a fresh scratch git repository under the base folder with one commit on `main`, so each run is independent and no existing project is touched. It then opens a tmux session in that repository with two panes stacked vertically, the Researcher on top and the Executor below. Each pane runs `claude --name <name> --agent experiment-conductor:<role>` with its first prompt already submitted. The `-b BASE` option replaces the default base folder `~/ec-demo`, and its path and the `-l` path must not contain a double quote, a dollar sign or a backtick. The `-m MODE` option passes `--permission-mode MODE` to both sessions, and without it no such flag is passed. The `-d` option creates the session without attaching to it.
 
-The Researcher prompt asks for a dry-run batch of 5 dummy experiments on your partition, with E003 depending on E002 and E004 failing every time. The prompt also states that you approve this batch in advance. The two sessions are named after the run, and each prompt gives the name of the other session. The Researcher writes the batch, marks the records ready and messages the Executor session. The Executor runs the jobs and messages the Researcher session each time an experiment is ready for analysis and when the batch is finished. The Researcher analyzes each experiment and writes the batch report. These messages use Claude Code's [cross-session messaging](https://code.claude.com/docs/en/cross-session-messaging.md), which needs Claude Code v2.1.224 or later.
+The demo was exercised in auto permission mode, because the sessions need to send messages, run git and use the scheduler. In other modes the presenter may need to approve tool prompts during the talk.
+
+The Researcher prompt asks for a dry-run batch of 5 dummy experiments on your partition, with E003 depending on E002 and E004 failing every time. The prompt also states that you approve every record in this batch, so the Researcher can mark each one ready. The two sessions are named after the run, and each prompt gives the name of the other session. The Researcher writes the batch, marks the records ready and messages the Executor session. The Executor runs the jobs and messages the Researcher session each time an experiment is ready for analysis and when the batch is finished. The Researcher analyzes each experiment and writes the batch report. These messages use Claude Code's [cross-session messaging](https://code.claude.com/docs/en/cross-session-messaging.md), which needs Claude Code v2.1.224 or later.
 
 In the experiments pane, the audience sees the five records move from `proposed` to `ready`, then through `running` and `done`, with the review field passing `awaiting-analysis` before a verdict. E003 waits for E002, and E004 shows the failure path with its reason. Messages between the sessions appear as one-line previews in each pane. The tmux session needs a terminal wide enough for the experiments pane to open by itself, and `/experiments` opens it at any width.
 
