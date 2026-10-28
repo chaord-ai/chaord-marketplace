@@ -74,6 +74,19 @@ The `showPane` option, on by default, controls the pane. Turn it off in `/config
 
 Experiment Conductor is not autonomous research. Nothing runs without your approval, and only you, or the Researcher with your agreement, decide what a result means. The plugin is not a job scheduler either, because the Executor uses the scheduler you already have, such as SLURM, or plain processes on one machine. The pane shows the status written in the records, and live job state is checked by the Executor at the start of each session. Merging a batch into `main` is always your action.
 
+## Acceptance run
+
+The script `tests/acceptance/run.sh` runs both roles headless through one fixed batch in a new scratch git repository and checks the result. The Researcher proposes and approves the batch, an Executor runs it and is stopped mid-batch, a second Executor resumes, and the Researcher writes the report. The batch holds a dependency, a job that fails by design and a job that times out once. An agent is then asked to commit on `main`. The script checks the attempt lines, `jobs`, the dependency order, the retry, the report sections and the branch guard, prints a pass or fail table, and exits non-zero when any check fails. The scratch repository and the agent transcripts stay in place for inspection.
+
+Run it from a shell where `claude` is logged in, on a SLURM login node with a partition or on any machine with `--local`:
+
+```
+sh tests/acceptance/run.sh --partition gpu --model sonnet
+sh tests/acceptance/run.sh --local --model sonnet
+```
+
+A local run with Sonnet takes about four minutes. On SLURM the run also waits for the queue, and the work directory must be on a filesystem the compute nodes can read.
+
 ## License
 
 This plugin is licensed under the [MIT License](./LICENSE).
