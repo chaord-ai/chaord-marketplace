@@ -60,7 +60,7 @@ base_dir=$(cd "$base_dir" && pwd) || exit 1
 check_path BASE "$base_dir"
 base=$(mktemp -d "$base_dir/run.XXXXXX")
 id=${base##*.}
-repo=$base/lab
+repo=$base/project
 launch=$base/launch
 mkdir "$repo" "$launch"
 
