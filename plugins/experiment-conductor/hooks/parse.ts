@@ -1,13 +1,43 @@
-import type { ExperimentRow } from '../types'
+import type { Attempt, ExperimentRow } from '../types'
 
 function unquote(value: string): string {
   return value.trim().replace(/^["']|["']$/g, '')
 }
 
+// Drops a field's leading word, as `job` in `job 481233`.
+function after(field: string, word: string): string {
+  return field.startsWith(`${word} `) ? field.slice(word.length + 1).trim() : field
+}
+
+// One attempt line, in the form skills/experiment-protocol/SKILL.md defines:
+// `- date time | commit | job | run | provenance | change | outcome | log`.
+// A line with fewer fields keeps its outcome and log as its last two.
+export function parseAttempt(line: string): Attempt {
+  const fields = line
+    .replace(/^-\s*/, '')
+    .split('|')
+    .map(f => f.trim())
+  const at = (i: number) => fields[i] ?? ''
+  const [date = '', time = ''] = at(0).split(/\s+/)
+  const isFull = fields.length >= 8
+  return {
+    date,
+    time,
+    commit: after(at(1), 'commit'),
+    job: after(at(2), 'job'),
+    run: isFull ? after(at(3), 'run') : '',
+    provenance: isFull ? after(at(4), 'provenance') : '',
+    change: isFull ? at(5) : '',
+    outcome: fields.length >= 3 ? at(fields.length - 2) : '',
+    log: fields.length >= 3 ? at(fields.length - 1) : '',
+  }
+}
+
 // Reads one record the way hooks/session-start.sh does: front matter fields,
 // the last entry of `jobs` (inline `[a, b]` or a block list of `- a` lines),
 // the number of attempt lines, and the outcome of the last attempt line (its
-// second to last field) as the reason.
+// second to last field) as the reason. For the expanded row it also reads the
+// text under Hypothesis, Success criterion and Verdict, and every attempt.
 export function parseRecord(fileName: string, text: string): ExperimentRow {
   const row: ExperimentRow = {
     id: '',
@@ -18,7 +48,16 @@ export function parseRecord(fileName: string, text: string): ExperimentRow {
     latestJob: '',
     reason: '',
     isValid: false,
+    hypothesis: '',
+    success: '',
+    verdict: '',
+    attemptList: [],
   }
+  const prose = new Map<string, string[]>([
+    ['Hypothesis', []],
+    ['Success criterion', []],
+    ['Verdict', []],
+  ])
   const lines = text.split('\n').map(raw => raw.replace(/\r$/, ''))
   let fence = /^---\s*$/.test(lines[0] ?? '') ? 0 : -1
   let section = ''
@@ -62,10 +101,17 @@ export function parseRecord(fileName: string, text: string): ExperimentRow {
     }
     if (section === 'Attempts' && line.startsWith('- ')) {
       row.attempts++
-      const fields = line.split('|').map(f => f.trim())
-      row.reason = fields.length >= 3 ? (fields[fields.length - 2] ?? '') : ''
+      const attempt = parseAttempt(line)
+      row.attemptList.push(attempt)
+      row.reason = attempt.outcome
+      continue
     }
+    const kept = prose.get(section)
+    if (kept && line.trim() !== '') kept.push(line.trim())
   }
+  row.hypothesis = (prose.get('Hypothesis') ?? []).join(' ')
+  row.success = (prose.get('Success criterion') ?? []).join(' ')
+  row.verdict = (prose.get('Verdict') ?? []).join(' ')
   row.isValid = fence === 2 && row.id !== '' && row.status !== ''
   if (row.id === '') row.id = fileName.replace(/\.md$/, '')
   return row
