@@ -1,0 +1,14 @@
+{
+  "name": "chaord-marketplace",
+  "owner": { "name": "Chaord AI" },
+  "description": "Claude Code plugins from Chaord for personal AI infrastructure and workflow.",
+  "plugins": [
+    {
+      "name": "experiment-conductor",
+      "source": "./plugins/experiment-conductor",
+      "description": "Researcher and Executor agents that run GPU-cluster experiments with you in the loop, keeping a lab record that survives across sessions.",
+      "version": "0.1.0",
+      "license": "MIT"
+    }
+  ]
+}
