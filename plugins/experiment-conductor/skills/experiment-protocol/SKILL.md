@@ -84,7 +84,7 @@ Both roles stay inside the project directory and the scheduler's own logs. Never
 
 ## Failures
 
-The Executor classifies each failure as `OOM`, `code bug`, `infra` or `timeout`. A purely mechanical fix that keeps the experiment's meaning intact is allowed, such as a smaller batch with gradient accumulation at the same effective batch size, more wall time, or resubmitting after a node fault. Each retry is a new attempt line and a new entry in `jobs`. After two retries, or for any fix that would change what the experiment measures, the record goes to `needs-decision` with the reason.
+The Executor submits the record's `Command / resources` as written. The Executor classifies each failure as `OOM`, `code bug`, `infra`, `timeout` or `submission`. A `submission` failure is a mistake in how the Executor submitted the job, and it says nothing about the experiment. A purely mechanical fix that keeps the experiment's meaning intact is allowed, such as a smaller batch with gradient accumulation at the same effective batch size, more wall time, or resubmitting after a node fault. Each retry is a new attempt line and a new entry in `jobs`. A `submission` failure gets its own attempt line and `jobs` entry too, but it does not count toward the retry limit. After two `submission` failures in a row, the record goes to `needs-decision` with the reason. After two retries of any other class, or for any fix that would change what the experiment measures, the record goes to `needs-decision` with the reason.
 
 Shared filesystems such as NFS can show a job's outputs a few seconds after the scheduler reports it finished. If expected outputs are missing right after a job ends, recheck three times over about 30 seconds before classifying it as a failure.
 
