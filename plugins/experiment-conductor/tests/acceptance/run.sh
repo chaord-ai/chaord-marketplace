@@ -24,8 +24,9 @@ Usage: sh run.sh (--local | --partition NAME) [--model MODEL] [--workdir DIR]
                     DIR (its repo and logs), without starting any agent
 
 Exit status: 0 when every check passes, 1 when a check fails, 2 when the
-run itself could not be carried out, including when an agent's tool call was
-denied by the permission mode.
+run itself could not be carried out, including a check failing after the
+permission mode denied an agent's tool call. A denial the agents recovered
+from is printed as a warning.
 EOF
 }
 
@@ -618,10 +619,15 @@ if [ "$mode" = local ]; then
     done <"$final/$id.attempts"
   done
 fi
+failed=no
+awk -F '\t' '$2 == "FAIL" { f = 1 } END { exit !f }' "$results" && failed=yes
 if [ -n "$denied" ]; then
   echo
-  echo "HARNESS PROBLEM: the permission mode denied tool calls, so the agents could not do their work (exit 2):$denied"
-  exit 2
+  if [ "$failed" = yes ]; then
+    echo "HARNESS PROBLEM: the permission mode denied tool calls, so the failures above may come from the harness rather than the agents (exit 2):$denied"
+    exit 2
+  fi
+  echo "warning: the permission mode denied tool calls, and the agents recovered from them:$denied"
 fi
-awk -F '\t' '$2 == "FAIL" { f = 1 } END { exit !f }' "$results" && exit 1
+[ "$failed" = yes ] && exit 1
 exit 0
