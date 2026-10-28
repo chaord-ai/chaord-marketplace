@@ -33,14 +33,21 @@ export function jobsToQuery(view: LabView, expanded: readonly string[]): string[
 
 // Asks SLURM's accounting (`sacct`) about the jobs, read-only. One line per
 // job: `62940|RUNNING|0:0`. A state such as `CANCELLED by 1000` keeps its
-// first word. Undefined when sacct is missing or fails.
+// first word. Undefined only when sacct cannot be started at all. When sacct
+// runs but fails or does not know a job, that job gets no state. The start
+// time reaches back a week so jobs submitted before today are found.
 async function askSlurm($: EngineInterface, ids: string[]): Promise<JobStates | undefined> {
+  let result
   try {
-    const result = await $.process.run(
-      ['sacct', '-X', '-n', '-P', '-o', 'JobID,State,ExitCode', '-j', ids.join(',')],
+    result = await $.process.run(
+      ['sacct', '-X', '-n', '-P', '-S', 'now-7days', '-o', 'JobID,State,ExitCode', '-j', ids.join(',')],
       { timeoutMs: QUERY_TIMEOUT_MS },
     )
-    if (result.exitCode !== 0) return undefined
+  } catch {
+    return undefined
+  }
+  if (result.exitCode !== 0) return {}
+  try {
     const states: JobStates = {}
     for (const line of result.stdout.split('\n')) {
       const [id = '', state = '', exitCode = ''] = line.trim().split('|')
@@ -53,7 +60,7 @@ async function askSlurm($: EngineInterface, ids: string[]): Promise<JobStates | 
     }
     return states
   } catch {
-    return undefined
+    return {}
   }
 }
 
@@ -80,7 +87,7 @@ async function askProcesses($: EngineInterface, ids: string[]): Promise<JobState
 }
 
 // The live state of each job: from sacct where SLURM answers, else from the
-// process table. An empty result means the pane shows the records' status
+// process table when sacct cannot start. An empty result means the pane shows the records' status
 // alone. Never throws and never writes anything.
 export async function queryJobs($: EngineInterface, ids: string[]): Promise<JobStates> {
   if (ids.length === 0) return {}

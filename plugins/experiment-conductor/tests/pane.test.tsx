@@ -400,7 +400,7 @@ test('a running record whose job SLURM reports finished is flagged record not up
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   // Only the latest job of each running or open failed record is asked about.
   expect(host.queries).toEqual([
-    ['sacct', '-X', '-n', '-P', '-o', 'JobID,State,ExitCode', '-j', '62938,62939,62940'],
+    ['sacct', '-X', '-n', '-P', '-S', 'now-7days', '-o', 'JobID,State,ExitCode', '-j', '62938,62939,62940'],
   ])
   const ui = await $.ui.mount({ ...DRY_PANE, surface: 'terminal' })
   expect(await lines(ui)).toEqual(COLLAPSED)
@@ -437,6 +437,40 @@ test('on a single machine the process table says whether each job is alive', asy
   await ui.unmount()
 })
 
+const OK = { exitCode: 0, stderr: '', isStdoutTruncated: false, isStderrTruncated: false }
+
+test('sacct that exits non-zero asks no ps and flags no row', async ($, on) => {
+  const host = project(on, () => ({ value: { ...OK, exitCode: 1, stdout: '' } }))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  expect(host.queries.map(argv => argv[0])).toEqual(['sacct'])
+  const ui = await $.ui.mount({ ...DRY_PANE, surface: 'terminal' })
+  const drawn = await lines(ui)
+  expect(drawn[3]).toBe('  ▸ E003 Follow-up on E002        running   job 62940')
+  expect(drawn[5]).toBe('  ▸ E005 Variant B (worse)        running   job 62939')
+  await ui.unmount()
+})
+
+test('an empty sacct state for a running job does not flag the row', async ($, on) => {
+  project(on, argv =>
+    argv[0] === 'sacct'
+      ? { value: { ...OK, stdout: '62939||0:0\n62940|RUNNING|0:0' } }
+      : { deny: 'not found' },
+  )
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const ui = await $.ui.mount({ ...DRY_PANE, surface: 'terminal' })
+  const drawn = await lines(ui)
+  expect(drawn[5]).not.toContain('record not updated')
+  await ui.unmount()
+})
+
+test('without sacct the ps fallback is used', async ($, on) => {
+  const host = project(on, argv =>
+    argv[0] === 'ps' ? { value: { ...OK, stdout: '62940\n' } } : { deny: 'not found' },
+  )
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  expect(host.queries.map(argv => argv[0])).toEqual(['sacct', 'ps'])
+})
+
 test('pressing a row expands it in place and pressing it again collapses it', async ($, on) => {
   const host = project(on, stubSacct)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
@@ -456,7 +490,7 @@ test('pressing a row expands it in place and pressing it again collapses it', as
     ])
     // Expanding asks about every attempt's job of the expanded row too.
     expect(host.queries[host.queries.length - 1]).toEqual([
-      'sacct', '-X', '-n', '-P', '-o', 'JobID,State,ExitCode', '-j', '62938,62939,62940',
+      'sacct', '-X', '-n', '-P', '-S', 'now-7days', '-o', 'JobID,State,ExitCode', '-j', '62938,62939,62940',
     ])
     await ui.press({ key: '2026-10-29-workflow-dry-run/E004' })
     expect(await lines(ui)).toEqual(COLLAPSED)

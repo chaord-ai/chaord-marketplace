@@ -72,6 +72,7 @@ let last = ''
 let lastJobs = ''
 let isOpened = false
 let isQuerying = false
+let isFollowUp = false
 
 async function refresh($: EngineInterface): Promise<void> {
   const view = await scan($).catch((): LabView => ({ hasLab: false, batches: [] }))
@@ -87,9 +88,13 @@ async function refresh($: EngineInterface): Promise<void> {
 }
 
 // Asks the scheduler, read-only, about the jobs the pane shows. One query at
-// a time; a failure leaves the rows with the records' status alone.
-async function refreshJobs($: EngineInterface): Promise<void> {
-  if (isQuerying) return
+// a time; a failure leaves the rows with the records' status alone. A row
+// expanded during a query queues one more query for when this one ends.
+async function refreshJobs($: EngineInterface, isRequested = false): Promise<void> {
+  if (isQuerying) {
+    if (isRequested) isFollowUp = true
+    return
+  }
   isQuerying = true
   try {
     const ids = jobsToQuery(await read($, lab), await read($, expanded))
@@ -102,13 +107,17 @@ async function refreshJobs($: EngineInterface): Promise<void> {
   } finally {
     isQuerying = false
   }
+  if (isFollowUp) {
+    isFollowUp = false
+    await refreshJobs($)
+  }
 }
 
 async function toggle($: EngineInterface, key: string): Promise<void> {
   await update($, expanded, list =>
     list.includes(key) ? list.filter(one => one !== key) : [...list, key],
   )
-  await refreshJobs($)
+  await refreshJobs($, true)
 }
 
 export const register: Register = (on, options) => {

@@ -7,19 +7,18 @@ import { needsAttention } from './parse'
 
 const VERDICTS = ['supported', 'refuted', 'inconclusive']
 
-// SLURM states in which a job has not finished yet.
-const ACTIVE = new Set([
-  'PENDING',
-  'CONFIGURING',
-  'RUNNING',
-  'COMPLETING',
-  'SUSPENDED',
-  'REQUEUED',
-  'REQUEUE_HOLD',
-  'REQUEUE_FED',
-  'RESIZING',
-  'SIGNALING',
-  'STAGE_OUT',
+// SLURM states in which a job has certainly finished. Any other state, or
+// none, leaves the row unflagged.
+const TERMINAL = new Set([
+  'COMPLETED',
+  'FAILED',
+  'CANCELLED',
+  'TIMEOUT',
+  'OUT_OF_MEMORY',
+  'NODE_FAIL',
+  'PREEMPTED',
+  'BOOT_FAIL',
+  'DEADLINE',
 ])
 
 const NAME_WIDTH = 30
@@ -38,7 +37,8 @@ function latestState(row: ExperimentRow, jobs: JobStates): JobState | undefined 
 // A running record whose latest job the scheduler reports finished.
 export function isStale(row: ExperimentRow, jobs: JobStates): boolean {
   const state = latestState(row, jobs)
-  return row.status === 'running' && state !== undefined && !ACTIVE.has(state.state)
+  if (row.status !== 'running' || state === undefined) return false
+  return state.source === 'process' ? state.state === 'ENDED' : TERMINAL.has(state.state)
 }
 
 function schedulerState(state: JobState): string {
