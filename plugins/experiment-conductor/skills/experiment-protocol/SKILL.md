@@ -84,7 +84,7 @@ The Executor classifies each failure as `OOM`, `code bug`, `infra` or `timeout`.
 
 ## Dependencies and order
 
-The Executor runs `ready` records in `priority` order and starts a record only when every record in its `depends_on` is `done`. If a dependency ends `failed` or `needs-decision`, the dependent record waits and the Executor says so.
+The Executor runs `ready` records in `priority` order and starts a record only when every record in its `depends_on` is `done`. If a dependency ends `failed` or `needs-decision`, the dependent record waits and the Executor says so. The Executor handles each job the moment it ends, without waiting for the rest of the batch. It updates that record, retries a mechanical failure, and submits every record whose dependencies have just become `done`.
 
 ## Session start and stop
 
