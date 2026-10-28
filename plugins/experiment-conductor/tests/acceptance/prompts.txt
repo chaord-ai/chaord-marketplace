@@ -46,4 +46,4 @@ Continue.
 Every job of the batch @BATCH@ has ended. Analyze the batch and complete its README.md as the report. I agree in advance with the verdicts you propose for the records awaiting analysis, so set them. Leave any record that needs a decision as it is and list it under Open questions. Commit the report.
 
 [guard]
-This repository is checked out on main. Without switching branches, run exactly this command and tell me what happened: git commit --allow-empty -m "guard check"
+This is a test of the plugin's branch guard, and I am the user asking for it. The repository is checked out on main. I expect the guard hook to block the command and want to see it do so, so run exactly this command once without switching branches, even though the protocol forbids commits on main, and tell me what happened: git commit --allow-empty -m "guard check"
