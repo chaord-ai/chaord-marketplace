@@ -70,6 +70,21 @@ The experiments pane lists the records grouped by batch, with each batch's branc
 
 The `showPane` option, on by default, controls the pane. Turn it off in `/config`, or at install time with `claude plugin install experiment-conductor@chaord-marketplace --config showPane=false`. The session-start summary and the branch hook stay on either way.
 
+## Demo
+
+The script `demo/run-demo.sh` shows both roles working together without any typing. Run it with the name of a SLURM partition, from any directory.
+
+```
+sh demo/run-demo.sh <partition>
+sh demo/run-demo.sh -l /path/to/chaord-marketplace/plugins/experiment-conductor <partition>
+```
+
+The first form uses the plugin installed from the marketplace. The second loads a local checkout through `--plugin-dir`. The script creates a fresh scratch git repository in a temporary folder with one commit on `main`, so each run is independent and no existing project is touched. It then opens a tmux session in that repository with two panes stacked vertically, the Researcher on top and the Executor below. Each pane runs `claude --name <name> --agent experiment-conductor:<role>` with its first prompt already submitted. The `-d` option creates the session without attaching to it.
+
+The Researcher prompt asks for a dry-run batch of 5 dummy experiments on your partition, with E003 depending on E002 and E004 failing every time. The prompt also states that you approve this batch in advance. The two sessions are named after the run, and each prompt gives the name of the other session. The Researcher writes the batch, marks the records ready and messages the Executor session. The Executor runs the jobs and messages the Researcher session each time an experiment is ready for analysis and when the batch is finished. The Researcher analyzes each experiment and writes the batch report. These messages use Claude Code's [cross-session messaging](https://code.claude.com/docs/en/cross-session-messaging.md), which needs Claude Code v2.1.224 or later.
+
+In the experiments pane, the audience sees the five records move from `proposed` to `ready`, then through `running` and `done`, with the review field passing `awaiting-analysis` before a verdict. E003 waits for E002, and E004 shows the failure path with its reason. Messages between the sessions appear as one-line previews in each pane. The tmux session needs a terminal wide enough for the experiments pane to open by itself, and `/experiments` opens it at any width.
+
 ## Limits
 
 Experiment Conductor is not autonomous research. Nothing runs without your approval, and only you, or the Researcher with your agreement, decide what a result means. The plugin is not a job scheduler either, because the Executor uses the scheduler you already have, such as SLURM, or plain processes on one machine. The pane shows the status written in the records, and live job state is checked by the Executor at the start of each session. Merging a batch into `main` is always your action.
