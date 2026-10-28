@@ -76,9 +76,9 @@ Experiment Conductor is not autonomous research. Nothing runs without your appro
 
 ## Acceptance run
 
-The script `tests/acceptance/run.sh` runs both roles headless through one fixed batch in a new scratch git repository and checks the result. The Researcher proposes and approves the batch, an Executor runs it and is stopped mid-batch, a second Executor resumes, and the Researcher writes the report. The batch holds a dependency, a job that fails by design and a job that times out once. An agent is then asked to commit on `main`. The script checks the attempt lines, `jobs`, the dependency order, the retry, the report sections and the branch guard, prints a pass or fail table, and exits non-zero when any check fails. The scratch repository and the agent transcripts stay in place for inspection.
+The script `tests/acceptance/run.sh` runs both roles headless through one fixed batch in a new scratch git repository and checks the result. The Researcher proposes and approves the batch, an Executor runs it and is stopped mid-batch, a second Executor resumes, and the Researcher writes the report. The batch holds a dependency, a job that fails by design and a job that times out once. An agent is then asked to commit on `main`. The script checks that each attempt line names a commit on the batch branch, an existing run directory and a valid job id, and it checks `jobs`, the dependency order, the timeout retry, the report sections and the branch guard. The guard check passes only when the transcript shows the hook refusing the git command. The script prints a pass or fail table and exits 1 when a check fails. When a tool call is denied by the permission mode, it exits 2 and names the denied tool and command. The scratch repository and the agent transcripts stay in place for inspection.
 
-Run it from a shell where `claude` is logged in, on a SLURM login node with a partition or on any machine with `--local`:
+Run the command from the plugin folder, `plugins/experiment-conductor`, in a shell where `claude` is logged in. Use a SLURM login node with a partition, or any machine with `--local`:
 
 ```
 sh tests/acceptance/run.sh --partition gpu --model sonnet
@@ -86,6 +86,12 @@ sh tests/acceptance/run.sh --local --model sonnet
 ```
 
 A local run with Sonnet takes about four minutes. On SLURM the run also waits for the queue, and the work directory must be on a filesystem the compute nodes can read.
+
+To repeat only the checks on a finished run, pass its work directory to `--check-only`. No agent starts, and the guard and permission checks read the saved transcripts.
+
+```
+sh tests/acceptance/run.sh --check-only ec-acceptance.AbC123
+```
 
 ## License
 
