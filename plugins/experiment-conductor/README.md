@@ -1,6 +1,6 @@
 # experiment-conductor
 
-experiment-conductor splits experimentation into two roles. The Researcher discusses direction with you, designs experiments with clear hypotheses and success criteria, and analyzes results. The Executor runs approved experiments on your cluster and records every attempt. Both follow one shared protocol and keep one Markdown file per experiment in your project. Any new session can see what finished, what is running and what comes next, and a pane shows you the same state at a glance. Nothing to install beyond the plugin: no database, no daemon.
+experiment-conductor splits experimentation into two roles. The Researcher discusses direction with you, designs experiments with clear hypotheses and success criteria, and analyzes results. The Executor runs approved experiments on your cluster and records every attempt. Both follow one shared protocol and keep one Markdown file per experiment in your project, grouped in batches that each live on their own git branch. Any new session can see what finished, what is running and what comes next, and a pane shows you the same state at a glance. Nothing to install beyond the plugin: no database, no daemon.
 
 ## Install
 
@@ -27,13 +27,13 @@ claude --agent experiment-conductor:researcher
 claude --agent experiment-conductor:executor
 ```
 
-A typical loop starts with the Researcher, who proposes a batch of experiments and waits for your approval. Once you approve, the records become `ready`, and the Executor session submits them, monitors the jobs and records each attempt. When jobs finish, the Researcher analyzes them against their success criteria and writes verdicts with your agreement. Either session can end at any time, because the next one starts from the records and the live job state rather than from conversation history.
+A typical loop starts with the Researcher, who creates a batch branch from `main`, writes the batch plan and its records, and waits for your approval. Once you approve, the records become `ready`, and the Executor session switches to the batch branch, commits the code each job uses, submits the jobs, monitors them and records each attempt. When jobs finish, the Researcher analyzes them against their success criteria, writes verdicts with your agreement, and completes the batch report. You decide whether to merge the batch into `main`. Either session can end at any time, because the next one starts from the records and the live job state rather than from conversation history.
 
 The protocol works the same on a single GPU machine without a scheduler. In that case the Executor runs plain processes and records their process ids as job ids.
 
-## Records
+## Batches and records
 
-Each experiment is one file at `lab/experiments/<ID>-<slug>.md` in your project, with IDs `E001`, `E002` and so on:
+Each batch is a folder `lab/<YYYY-MM-DD>-<batch-slug>/` in your project, worked on in the branch `exp/<YYYY-MM-DD>-<batch-slug>`. The folder holds a `README.md` that starts as the batch plan and ends as its report, and one record per experiment. Experiment IDs run `E001`, `E002` and so on across all batches, so a follow-up in a later batch can name an earlier experiment. Each record looks like this:
 
 ```
 ---
@@ -49,24 +49,30 @@ jobs: []                # one job id per attempt, in order
 ## Change vs baseline
 ## Command / resources
 ## Success criterion
-## Attempts            # Executor appends: date, job id, what changed, outcome, log path
+## Attempts            # Executor appends one line per attempt
 ## Result              # Researcher: numbers + output paths
 ## Verdict             # Researcher: verdict + one-line evidence
 ```
 
-The `experiment-protocol` skill defines who may change each field, how failures and retries are handled, and how sessions start and end. Because the records are plain Markdown, you can read and edit them yourself and keep them in git with the rest of the project.
+Every attempt line names the commit SHA the job ran, the job id, the run directory and the run's provenance file, so any finished result can be traced back to the code that produced it. The `experiment-protocol` skill defines the attempt line, who may change each field, how failures and retries are handled, and how sessions start and end. Because the records are plain Markdown, you can read and edit them yourself.
 
-When a session starts in a project that has `lab/experiments/`, the plugin adds a short summary to the session's context with the count of records per status, the running records with their job ids, the records awaiting analysis and the records that need a decision.
+When a session starts in a project that has `lab/`, the plugin adds a short summary to the session's context. The summary counts records per status and, for each batch with its branch, lists the running records with their job ids, the records awaiting analysis, the failed records and the records that need a decision. Records whose front matter cannot be read are named so you can fix them.
+
+## Git rules
+
+The project must be a git repository, and the batch folders are committed with the rest of the project. The Executor commits code and configs before each submission and will not run with uncommitted changes unless you allow it, in which case it saves the diff next to the run. Commit messages start with `[exp] <ID> propose`, `[exp] <ID> attempt N` or `[exp] <ID> verdict: <verdict>`, and messages that record results state what was tested, the key numbers and their interpretation.
+
+Agents never commit, push or merge on `main`. A hook enforces this rule in the Researcher and Executor sessions and in subagents of those types. The hook blocks `git commit`, `git merge` and `git push` while the repository is on `main` or `master`, and any `git push` that targets `main` or `master` from any branch, and tells the agent to switch to the batch branch. Sessions started without either agent are not affected, so you can still merge a batch yourself. The hook runs in POSIX sh and awk on the machine where Claude Code runs, including a cluster login node.
 
 ## The pane
 
-The experiments pane lists every record with its ID, title, status, review, attempt count, latest job id and, for failed or `needs-decision` records, the reason. Records that need you are marked with `!` and highlighted. The pane rereads `lab/experiments/` every 15 seconds and opens by itself when the terminal is wide enough. Type `/experiments` to open it at any width.
+The experiments pane lists the records grouped by batch, with each batch's branch. For every record the pane shows its ID, title, status, review, attempt count, latest job id and, for failed or `needs-decision` records, the reason. Records that need you are marked with `!` and highlighted, as are records whose front matter cannot be read. The pane rereads `lab/` every 15 seconds and opens by itself when the terminal is wide enough. Type `/experiments` to open it at any width.
 
-The `showPane` option, on by default, controls the pane. Turn it off in `/config`, or at install time with `claude plugin install experiment-conductor@chaord-marketplace --config showPane=false`. The session-start summary stays on either way.
+The `showPane` option, on by default, controls the pane. Turn it off in `/config`, or at install time with `claude plugin install experiment-conductor@chaord-marketplace --config showPane=false`. The session-start summary and the branch hook stay on either way.
 
 ## Limits
 
-experiment-conductor is not autonomous research. Nothing runs without your approval, and only you, or the Researcher with your agreement, decide what a result means. The plugin is not a job scheduler either: the Executor uses the scheduler you already have, such as SLURM, or plain processes on one machine. The pane shows the status written in the records, and live job state is checked by the Executor at the start of each session.
+experiment-conductor is not autonomous research. Nothing runs without your approval, and only you, or the Researcher with your agreement, decide what a result means. The plugin is not a job scheduler either, because the Executor uses the scheduler you already have, such as SLURM, or plain processes on one machine. The pane shows the status written in the records, and live job state is checked by the Executor at the start of each session. Merging a batch into `main` is always your action.
 
 ## License
 

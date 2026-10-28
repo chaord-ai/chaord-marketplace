@@ -9,7 +9,7 @@
     "showPane": {
       "type": "boolean",
       "title": "Show the experiments pane",
-      "description": "Open a live pane listing the records in lab/experiments/ when a session starts in a project that has them.",
+      "description": "Open a live pane listing the experiment records under lab/, grouped by batch, when a session starts in a project that has them.",
       "default": true
     }
   }
