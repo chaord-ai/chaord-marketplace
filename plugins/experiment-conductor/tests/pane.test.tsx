@@ -27,8 +27,8 @@ jobs: [481202, 481210]
 ---
 ## Hypothesis
 ## Attempts            # Executor appends one line per attempt
-- 2026-10-29 10:02 | commit 3f2a1bc | job 481202 | run runs/E005/1 | provenance none | first run | failed: code bug | logs/a.out
-- 2026-10-29 10:04 | commit 3f2a1bc | job 481210 | run runs/E005/2 | provenance none | none | needs-decision: KeyError in loader | logs/b.out
+- 2026-10-29 10:02 | commit 3f2a1bc | job 481202 | run runs/E005/1 | provenance runs/E005/1/provenance.json | first run | failed: code bug | logs/a.out
+- 2026-10-29 10:04 | commit 3f2a1bc | job 481210 | run runs/E005/2 | provenance runs/E005/2/provenance.json | none | needs-decision: KeyError in loader | logs/b.out
 ## Result
 ## Verdict
 `
@@ -58,8 +58,8 @@ jobs:
   - "481207"   # retry
 ---
 ## Attempts
-- 2026-10-29 10:01 | commit 3f2a1bc | job 481201 | run runs/E002/1 | provenance none | first run | failed: infra | logs/d.out
-- 2026-10-29 10:30 | commit 3f2a1bc | job 481207 | run runs/E002/2 | provenance none | resubmit | submitted | logs/e.out
+- 2026-10-29 10:01 | commit 3f2a1bc | job 481201 | run runs/E002/1 | provenance runs/E002/1/provenance.json | first run | failed: infra | logs/d.out
+- 2026-10-29 10:30 | commit 3f2a1bc | job 481207 | run runs/E002/2 | provenance runs/E002/2/provenance.json | resubmit | submitted | logs/e.out
 `
 
 const MALFORMED = `id: E009
@@ -92,6 +92,13 @@ test('a block list of jobs gives the latest job, and a record without front matt
   expect(broken.isValid).toBe(false)
   expect(broken.id).toBe('E009-no-fence')
   expect(needsAttention(broken)).toBe(true)
+})
+
+test('a failed record needs the user until it is closed with a verdict', () => {
+  const open = parseRecord('E004-fail.md', '---\nid: E004\ntitle: Fail\nstatus: failed\nreview: pending\njobs: [7]\n---\n')
+  expect(needsAttention(open)).toBe(true)
+  const closed = parseRecord('E004-fail.md', '---\nid: E004\ntitle: Fail\nstatus: failed\nreview: inconclusive\njobs: [7]\n---\n')
+  expect(needsAttention(closed)).toBe(false)
 })
 
 test('the pane groups records by batch, shows each branch and flags what needs the user', async ($, on) => {

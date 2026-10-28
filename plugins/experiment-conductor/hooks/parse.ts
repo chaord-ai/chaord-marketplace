@@ -71,13 +71,15 @@ export function parseRecord(fileName: string, text: string): ExperimentRow {
   return row
 }
 
-// Whether a record needs the user: a decision, a failure, an analysis to
-// agree on, a proposal waiting for approval, or a record that cannot be read.
+// Whether a record needs the user: a decision, a failure not yet closed with a
+// verdict, an analysis to agree on, a proposal waiting for approval, or a
+// record that cannot be read.
 export function needsAttention(row: ExperimentRow): boolean {
+  const hasVerdict = ['supported', 'refuted', 'inconclusive'].includes(row.review)
   return (
     !row.isValid ||
     row.status === 'needs-decision' ||
-    row.status === 'failed' ||
+    (row.status === 'failed' && !hasVerdict) ||
     row.status === 'proposed' ||
     row.review === 'awaiting-analysis'
   )

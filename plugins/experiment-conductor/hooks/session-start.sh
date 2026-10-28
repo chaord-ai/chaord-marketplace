@@ -63,7 +63,7 @@ function finish(   label, b) {
   }
   if (review == "awaiting-analysis") attn[b] = attn[b] "\n  awaiting analysis: " label
   if (status == "needs-decision") attn[b] = attn[b] "\n  needs decision: " label (reason == "" ? "" : " - " reason)
-  if (status == "failed") attn[b] = attn[b] "\n  failed: " label (reason == "" ? "" : " - " reason)
+  if (status == "failed" && review !~ /^(supported|refuted|inconclusive)$/) attn[b] = attn[b] "\n  failed: " label (reason == "" ? "" : " - " reason)
 }
 BEGIN {
   ne = split(empty, eparts, " ")
@@ -119,7 +119,7 @@ END {
     print "Batch " b " on branch exp/" b ": " line attn[b]
   }
   if (bad != "") print "Unrecognized records (missing or malformed front matter, or an unknown status):" bad
-  print "Follow the experiment-protocol skill: work on the batch branch, check every running job with the scheduler, fix stale statuses, then tell the user what finished, what is running and what comes next before acting."
+  print "Follow the experiment-protocol skill: work on the batch branch, check every running job with the scheduler, and make your first message the status report (what finished, what is running, what comes next, and any stale status you will correct) before changing anything."
 }
 ' "$@"
 branch_hint
