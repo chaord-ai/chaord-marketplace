@@ -97,9 +97,10 @@ The Executor runs `ready` records in `priority` order and starts a record only w
 At the start of a session, follow these steps in order.
 
 1. Switch to the batch branch you are working on. If the session starts on `main` while `exp/*` branches exist, the session-start summary names them.
-2. Read every record under `lab/`, and for each `running` record check the live state of its latest job with the scheduler (or the process on a single machine). Change nothing yet.
-3. Make your first message to the user the status report: what finished, what is running, what comes next, and every stale status you found with the correction you will make.
-4. Only then correct stale statuses by the rules above and continue. A role that may not make a correction leaves it to the user.
+2. Check that no other Executor is working this batch. The signs are a commit on the batch branch that this session did not make since it last read the branch, and a record that changed without this session changing it. If you see either sign, stop before submitting or editing anything and tell the user. Repeat this check before each later submission.
+3. Read every record under `lab/`, and for each `running` record check the live state of its latest job with the scheduler (or the process on a single machine). Change nothing yet.
+4. Make your first message to the user the status report: what finished, what is running, what comes next, and every stale status you found with the correction you will make.
+5. Only then correct stale statuses by the rules above and continue. A role that may not make a correction leaves it to the user.
 
 Before ending a session, make sure every record reflects reality, with no `running` record without a live job and no finished job without its attempt line, and commit the records.
 
