@@ -1,8 +1,12 @@
 #!/bin/sh
 # PreToolUse hook on Bash: keeps the Researcher and Executor off main. In a
 # session of either agent it blocks git commit, git merge and git push while
-# the repository is on main or master, and any git push whose refspec targets
-# main or master from any branch. Other sessions and other commands pass.
+# the repository is on main or master (also cherry-pick, rebase, am, revert,
+# reset and pull), and from any branch any git push whose refspec targets main
+# or master, any switch or checkout of main or master, and any update-ref or
+# branch -f/-m/-c that writes main or master. Other sessions and commands pass.
+# It reads the branch before the command runs and is a guardrail on the agents'
+# shell commands, not a security boundary.
 # Exit 2 blocks the call and hands stderr to the model. POSIX sh, awk, sed.
 
 input=$(cat)
@@ -42,11 +46,14 @@ cwd=$(json_string cwd)
 [ -n "$cwd" ] || cwd=.
 
 # One line per git invocation in the command: the -C directory (or "."), the
-# subcommand, and "main" when it is a push that names main or master.
+# subcommand, and a flag: "main" for a push that names main or master, "switch"
+# for a checkout or switch of main or master, "ref" for an update-ref or branch
+# command that writes main or master.
 calls=$(printf '%s\n' "$command" | awk '
 {
   line = $0
-  gsub(/&&|\|\||[;|&()]/, "\n", line)
+  gsub(/\$\(/, "\n", line)
+  gsub(/&&|\|\||[;|&()`]/, "\n", line)
   nseg = split(line, segs, "\n")
   for (s = 1; s <= nseg; s++) {
     n = split(segs[s], w, /[ \t]+/)
@@ -71,6 +78,35 @@ calls=$(printf '%s\n' "$command" | awk '
           if (ref == "main" || ref == "master") target = "main"
         }
       }
+      if (sub_ == "checkout" || sub_ == "switch") {
+        for (k = j + 1; k <= n; k++) {
+          if (w[k] == "--") break
+          if (w[k] ~ /^-/ || w[k] == "") continue
+          if (w[k] == "main" || w[k] == "master") target = "switch"
+          break
+        }
+      } else if (sub_ == "update-ref") {
+        for (k = j + 1; k <= n; k++) {
+          if (w[k] ~ /^-/) continue
+          ref = w[k]; sub(/^refs\/heads\//, "", ref)
+          if (ref == "main" || ref == "master") target = "ref"
+        }
+      } else if (sub_ == "branch") {
+        fmove = 0; fcopy = 0; fforce = 0; np = 0
+        for (k = j + 1; k <= n; k++) {
+          if (w[k] == "--move") fmove = 1
+          else if (w[k] == "--copy") fcopy = 1
+          else if (w[k] == "--force") fforce = 1
+          else if (w[k] ~ /^-[a-zA-Z]+$/) {
+            if (w[k] ~ /[mM]/) fmove = 1
+            if (w[k] ~ /[cC]/) fcopy = 1
+            if (w[k] ~ /f/) fforce = 1
+          } else if (w[k] !~ /^-/ && w[k] != "") pos[++np] = w[k]
+        }
+        if (fmove) { for (k = 1; k <= np; k++) if (pos[k] == "main" || pos[k] == "master") target = "ref" }
+        else if (fcopy) { if (np > 0 && (pos[np] == "main" || pos[np] == "master")) target = "ref" }
+        else if (fforce) { if (np > 0 && (pos[1] == "main" || pos[1] == "master")) target = "ref" }
+      }
       if (sub_ != "") print dir "\t" sub_ "\t" target
       break
     }
@@ -79,7 +115,15 @@ calls=$(printf '%s\n' "$command" | awk '
 
 tab=$(printf '\t')
 printf '%s\n' "$calls" | while IFS="$tab" read -r dir sub target; do
-  case "$sub" in commit | merge | push) ;; *) continue ;; esac
+  if [ "$target" = switch ]; then
+    echo "experiment-conductor: blocked git $sub to main. Stay on the batch branch exp/<YYYY-MM-DD>-<batch-slug>; merging to main is the user's action." >&2
+    exit 2
+  fi
+  if [ "$target" = ref ]; then
+    echo "experiment-conductor: blocked git $sub that writes main. Stay on the batch branch exp/<YYYY-MM-DD>-<batch-slug>; merging to main is the user's action." >&2
+    exit 2
+  fi
+  case "$sub" in commit | merge | push | cherry-pick | rebase | am | revert | reset | pull) ;; *) continue ;; esac
   case "$dir" in /*) ;; *) dir="$cwd/$dir" ;; esac
   branch=$(git -C "$dir" symbolic-ref --short -q HEAD 2>/dev/null)
   if [ "$sub" = push ] && [ "$target" = main ]; then

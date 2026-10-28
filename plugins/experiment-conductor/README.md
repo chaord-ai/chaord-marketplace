@@ -1,6 +1,6 @@
 # experiment-conductor
 
-experiment-conductor splits experimentation into two roles. The Researcher discusses direction with you, designs experiments with clear hypotheses and success criteria, and analyzes results. The Executor runs approved experiments on your cluster and records every attempt. Both follow one shared protocol and keep one Markdown file per experiment in your project, grouped in batches that each live on their own git branch. Any new session can see what finished, what is running and what comes next, and a pane shows you the same state at a glance. Nothing to install beyond the plugin: no database, no daemon.
+experiment-conductor splits experimentation into two roles. The Researcher discusses direction with you, designs experiments with clear hypotheses and success criteria, and analyzes results. The Executor runs approved experiments on your cluster and records every attempt. Both follow one shared protocol and keep one Markdown file per experiment in your project, grouped in batches that each live on their own git branch. Any new session can see what finished, what is running and what comes next, and a pane shows you the same state at a glance. Nothing needs installing beyond the plugin, with no database and no daemon.
 
 ## Install
 
@@ -56,13 +56,13 @@ jobs: []                # one job id per attempt, in order
 
 Every attempt line names the commit SHA the job ran, the job id, the run directory and the run's provenance file, so any finished result can be traced back to the code that produced it. The `experiment-protocol` skill defines the attempt line, who may change each field, how failures and retries are handled, and how sessions start and end. Because the records are plain Markdown, you can read and edit them yourself.
 
-When a session starts in a project that has `lab/`, the plugin adds a short summary to the session's context. The summary counts records per status and, for each batch with its branch, lists the running records with their job ids, the records awaiting analysis, the failed records and the records that need a decision. Records whose front matter cannot be read are named so you can fix them.
+When a session starts in a project that has `lab/`, the plugin adds a short summary to the session's context. The summary counts records per status and, for each batch with its branch, lists the running records with their job ids, the records awaiting analysis, the failed records and the records that need a decision. Records whose front matter cannot be read are named so you can fix them. When the session is on `main` and local `exp/*` branches exist, the summary also names them so the agent switches to its batch branch first.
 
 ## Git rules
 
 The project must be a git repository, and the batch folders are committed with the rest of the project. The Executor commits code and configs before each submission and will not run with uncommitted changes unless you allow it, in which case it saves the diff next to the run. Commit messages start with `[exp] <ID> propose`, `[exp] <ID> attempt N` or `[exp] <ID> verdict: <verdict>`, and messages that record results state what was tested, the key numbers and their interpretation.
 
-Agents never commit, push or merge on `main`. A hook enforces this rule in the Researcher and Executor sessions and in subagents of those types. The hook blocks `git commit`, `git merge` and `git push` while the repository is on `main` or `master`, and any `git push` that targets `main` or `master` from any branch, and tells the agent to switch to the batch branch. Sessions started without either agent are not affected, so you can still merge a batch yourself. The hook runs in POSIX sh and awk on the machine where Claude Code runs, including a cluster login node.
+Agents never commit, push or merge on `main`. A hook enforces this rule in the Researcher and Executor sessions and in subagents of those types. The hook blocks `git commit`, `git merge` and `git push` while the repository is on `main` or `master`, and any `git push` that targets `main` or `master` from any branch, and tells the agent to switch to the batch branch. The guard also covers branch switches to `main` or `master`, the other commands that write `main` (`cherry-pick`, `rebase`, `am`, `revert`, `reset`, `pull`, `update-ref` and `branch -f`), and commands chained with `&&`, `;`, backticks or `$(`. It is a guardrail on the agents' shell commands rather than a security boundary. Sessions started without either agent are not affected, so you can still merge a batch yourself. The hook runs in POSIX sh and awk on the machine where Claude Code runs, including a cluster login node.
 
 ## The pane
 

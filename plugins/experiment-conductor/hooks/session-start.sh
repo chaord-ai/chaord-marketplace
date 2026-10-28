@@ -7,6 +7,15 @@
 cd "${CLAUDE_PROJECT_DIR:-.}" 2>/dev/null || exit 0
 [ -d lab ] || exit 0
 
+# On main or master with local batch branches present, name them. Read-only git.
+branch_hint() {
+  cur=$(git symbolic-ref --short -q HEAD 2>/dev/null) || return 0
+  case "$cur" in main | master) ;; *) return 0 ;; esac
+  exps=$(git branch --list 'exp/*' --format='%(refname:short)' 2>/dev/null | tr '\n' ' ' | sed 's/ *$//')
+  [ -n "$exps" ] || return 0
+  echo "experiment-conductor: this session is on $cur and the local batch branches are $exps. Switch to your batch branch before reading or writing records."
+}
+
 # Every Markdown file in a batch folder is a record, except the batch README.
 # An empty record reaches awk as no lines at all, so it is named here.
 set --
@@ -18,6 +27,7 @@ for f in lab/*/*.md; do
 done
 if [ $# -eq 0 ] && [ -z "$empty" ]; then
   echo "experiment-conductor: lab/ holds no experiment records yet."
+  branch_hint
   exit 0
 fi
 
@@ -112,4 +122,5 @@ END {
   print "Follow the experiment-protocol skill: work on the batch branch, check every running job with the scheduler, fix stale statuses, then tell the user what finished, what is running and what comes next before acting."
 }
 ' "$@"
+branch_hint
 exit 0
