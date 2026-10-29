@@ -140,9 +140,13 @@ test('a block list of jobs gives the latest job, and a record without front matt
   expect(needsAttention(broken)).toBe(true)
 })
 
-test('a failed record needs the user until it is closed with a verdict', () => {
+test('only a proposal, a decision or an unreadable record needs the user', () => {
+  const proposed = parseRecord('E006-new.md', '---\nid: E006\ntitle: New\nstatus: proposed\nreview: pending\njobs: []\n---\n')
+  expect(needsAttention(proposed)).toBe(true)
+  const analysis = parseRecord('E001-done.md', '---\nid: E001\ntitle: Done\nstatus: done\nreview: awaiting-analysis\njobs: [5]\n---\n')
+  expect(needsAttention(analysis)).toBe(false)
   const open = parseRecord('E004-fail.md', '---\nid: E004\ntitle: Fail\nstatus: failed\nreview: pending\njobs: [7]\n---\n')
-  expect(needsAttention(open)).toBe(true)
+  expect(needsAttention(open)).toBe(false)
   const closed = parseRecord('E004-fail.md', '---\nid: E004\ntitle: Fail\nstatus: failed\nreview: inconclusive\njobs: [7]\n---\n')
   expect(needsAttention(closed)).toBe(false)
 })
@@ -172,9 +176,9 @@ test('the pane groups records by batch, shows each branch and flags what needs t
   for (const surface of ['terminal', 'desktop', 'vscode', 'mobile'] as const) {
     const ui = await $.ui.mount({ ...PANE, surface })
     expect(await lines(ui)).toEqual([
-      '4 experiments · 3 need you',
+      '4 experiments · 2 need you',
       'exp/2026-10-28-ssl',
-      '! ▸ E001 Baseline                 done      awaiting analysis',
+      '  ▸ E001 Baseline                 done      awaiting analysis',
       '  ▸ E002 Mask ratio 0.75          running   job 481207',
       'exp/2026-10-29-loader',
       '! ▸ E005 Broken data loader       needs decision · KeyError in loader',
@@ -253,8 +257,8 @@ test('at session start the module scans the batch folders and opens the pane', a
 
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   expect(await lines(ui)).toEqual([
-    '2 experiments · 1 needs you' + ' '.repeat(15) + 'exp/2026-10-28-ssl',
-    '! ▸ E001 Baseline                 done      awaiting analysis',
+    '2 experiments · 0 need you' + ' '.repeat(16) + 'exp/2026-10-28-ssl',
+    '  ▸ E001 Baseline                 done      awaiting analysis',
     '  ▸ E002 Mask ratio 0.75          running   job 481207',
   ])
   await ui.unmount()
@@ -387,9 +391,9 @@ function stubSacct(argv: readonly string[]): OpEventResult<'process.run'> {
 }
 
 const COLLAPSED = [
-  '5 experiments · 3 need you' + ' '.repeat(12) + 'exp/2026-10-29-workflow-dry-run',
-  '! ▸ E001 Dummy baseline           done      awaiting analysis',
-  '! ▸ E002 Dummy variant A          done      awaiting analysis',
+  '5 experiments · 1 needs you' + ' '.repeat(11) + 'exp/2026-10-29-workflow-dry-run',
+  '  ▸ E001 Dummy baseline           done      awaiting analysis',
+  '  ▸ E002 Dummy variant A          done      awaiting analysis',
   '  ▸ E003 Follow-up on E002        running   SLURM RUNNING · job 62940',
   '! ▸ E004 Forced failure           needs decision · exit 1 (code bug)',
   '  ▸ E005 Variant B (worse)        running   SLURM COMPLETED · record not updated',
