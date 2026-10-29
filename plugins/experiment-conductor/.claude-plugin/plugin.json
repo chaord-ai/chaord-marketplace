@@ -1,6 +1,6 @@
 {
   "name": "experiment-conductor",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Researcher and Executor agents that run GPU-cluster experiments with you in the loop, keeping a lab record that survives across sessions.",
   "author": { "name": "Chaord AI" },
   "license": "MIT",
