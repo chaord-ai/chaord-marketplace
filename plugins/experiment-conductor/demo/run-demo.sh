@@ -1,11 +1,12 @@
 #!/bin/sh
 # Opens the Researcher and Executor of experiment-conductor in two tmux panes
-# inside a fresh scratch git repo, with a first prompt already submitted.
+# inside a fresh scratch git repo at BASE/project, with a first prompt already
+# submitted.
 set -eu
 
 usage() {
   echo "usage: run-demo.sh [-b BASE] [-l PLUGIN_DIR] [-m MODE] [-d] PARTITION" >&2
-  echo "  -b BASE        folder that holds the scratch repos (default: \$HOME/ec-demo)" >&2
+  echo "  -b BASE        folder that holds the demo repo (default: \$HOME/ec-demo)" >&2
   echo "  -l PLUGIN_DIR  load the plugin from a local checkout (--plugin-dir)" >&2
   echo "  -m MODE        pass --permission-mode MODE to both sessions" >&2
   echo "  -d             create the tmux session but do not attach to it" >&2
@@ -53,16 +54,26 @@ if [ -n "$plugin_dir" ]; then
   check_path PLUGIN_DIR "$plugin_dir"
 fi
 
-# One fresh folder per run under BASE, which must be a trusted folder in
-# Claude Code so the sessions start without a trust dialog.
-mkdir -p "$base_dir"
+# Every run uses the same repo folder, BASE/project. Claude Code remembers
+# trust per git repo path, so the presenter trusts that path once and later
+# runs start without a trust dialog. The previous run's repo moves to
+# BASE/runs, and its launchers stay there too.
+mkdir -p "$base_dir/runs"
 base_dir=$(cd "$base_dir" && pwd) || exit 1
 check_path BASE "$base_dir"
-base=$(mktemp -d "$base_dir/run.XXXXXX")
-id=${base##*.}
-repo=$base/project
-launch=$base/launch
-mkdir "$repo" "$launch"
+running=$(tmux list-sessions -F '#{session_name}' 2>/dev/null | grep '^ecdemo-' || true)
+if [ -n "$running" ]; then
+  echo "error: an earlier demo is still running in tmux: $running" >&2
+  echo "stop it first with: tmux kill-session -t <name>" >&2
+  exit 1
+fi
+launch=$(mktemp -d "$base_dir/runs/launch.XXXXXX")
+id=${launch##*.}
+repo=$base_dir/project
+if [ -e "$repo" ]; then
+  mv "$repo" "$base_dir/runs/project.$(date +%Y%m%d-%H%M%S).$id"
+fi
+mkdir "$repo"
 
 git -C "$repo" init -q
 git -C "$repo" symbolic-ref HEAD refs/heads/main
