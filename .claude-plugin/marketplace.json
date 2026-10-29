@@ -7,7 +7,7 @@
       "name": "experiment-conductor",
       "source": "./plugins/experiment-conductor",
       "description": "Researcher and Executor agents that run GPU-cluster experiments with you in the loop, keeping a lab record that survives across sessions.",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "license": "MIT"
     }
   ]

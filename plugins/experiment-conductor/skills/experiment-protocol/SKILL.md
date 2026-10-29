@@ -48,7 +48,7 @@ Each attempt is one line under `## Attempts`, in this form:
 
 The fields are the date and time, the commit SHA the job ran, the job id, the run directory, the path to the run's provenance file, what changed from the previous attempt (`first run` for the first), the outcome, and the log path. On a machine without a scheduler, the job id is the process id or `local`, and `jobs` records the same value. When a record moves to `failed` or `needs-decision`, the outcome starts with the reason, for example `needs-decision: OOM persists at batch 8 with grad accumulation`. If no job was submitted, the line uses `job none`.
 
-Every run has a provenance file. When the project writes its own, the attempt line points to it. Otherwise the Executor writes `provenance.json` in the run directory at submission, holding the commit SHA, whether the working tree had uncommitted changes, the host, the job id, the command and the start time. Where run outputs live, and whether they are committed, is the project's choice; the record only names their paths.
+Every run has a provenance file. When the project writes its own, the attempt line points to it. Otherwise the Executor writes `provenance.json` in the run directory, holding the commit SHA, whether the working tree had uncommitted changes, `submit_host`, `node`, the job id, the command and the start time. The Executor writes `submit_host` at submission, and it names the machine the job was submitted from. The Executor fills in `node` from the scheduler when it records the attempt's outcome, since only the scheduler knows which node ran the job. The job id is stored as the bare id the scheduler accepts back, never the message the submit command prints. Where run outputs live, and whether they are committed, is the project's choice; the record only names their paths.
 
 ## Git
 
@@ -84,7 +84,7 @@ Both roles stay inside the project directory and the scheduler's own logs. Never
 
 ## Failures
 
-The Executor classifies each failure as `OOM`, `code bug`, `infra` or `timeout`. A purely mechanical fix that keeps the experiment's meaning intact is allowed, such as a smaller batch with gradient accumulation at the same effective batch size, more wall time, or resubmitting after a node fault. Each retry is a new attempt line and a new entry in `jobs`. After two retries, or for any fix that would change what the experiment measures, the record goes to `needs-decision` with the reason.
+The Executor submits the record's `Command / resources` as written. The Executor classifies each failure as `OOM`, `code bug`, `infra`, `timeout` or `submission`. A `submission` failure is a mistake in how the Executor submitted the job, and it says nothing about the experiment. A purely mechanical fix that keeps the experiment's meaning intact is allowed, such as a smaller batch with gradient accumulation at the same effective batch size, more wall time, or resubmitting after a node fault. Each retry is a new attempt line and a new entry in `jobs`. A `submission` failure gets its own attempt line and `jobs` entry too, but it does not count toward the retry limit. After two `submission` failures in a row, the record goes to `needs-decision` with the reason. After two retries of any other class, or for any fix that would change what the experiment measures, the record goes to `needs-decision` with the reason.
 
 Shared filesystems such as NFS can show a job's outputs a few seconds after the scheduler reports it finished. If expected outputs are missing right after a job ends, recheck three times over about 30 seconds before classifying it as a failure.
 
@@ -97,9 +97,10 @@ The Executor runs `ready` records in `priority` order and starts a record only w
 At the start of a session, follow these steps in order.
 
 1. Switch to the batch branch you are working on. If the session starts on `main` while `exp/*` branches exist, the session-start summary names them.
-2. Read every record under `lab/`, and for each `running` record check the live state of its latest job with the scheduler (or the process on a single machine). Change nothing yet.
-3. Make your first message to the user the status report: what finished, what is running, what comes next, and every stale status you found with the correction you will make.
-4. Only then correct stale statuses by the rules above and continue. A role that may not make a correction leaves it to the user.
+2. Check that no other Executor is working this batch. At session start the sign is a job in the scheduler that belongs to this batch's experiments (by its name or run directory) and that no record lists. Later in the session the signs are a commit on the batch branch made after this session started that this session did not make, and a record that changed without this session changing it. Repeat this check before each later submission. If you see any sign, stop before submitting or editing anything and tell the user.
+3. Read every record under `lab/`, and for each `running` record check the live state of its latest job with the scheduler (or the process on a single machine).
+4. Correct the stale statuses the rules above dictate, such as a `running` record whose job has ended, and commit the corrections. A role that may not make a correction leaves it to the user.
+5. Give the user the status report: what finished, what is running, what comes next, and the corrections you made. Until you have reported, submit nothing new and decide nothing, which includes retrying a failed job. Then continue.
 
 Before ending a session, make sure every record reflects reality, with no `running` record without a live job and no finished job without its attempt line, and commit the records.
 
