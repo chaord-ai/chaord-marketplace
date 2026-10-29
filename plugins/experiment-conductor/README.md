@@ -66,13 +66,25 @@ Agents never commit, push or merge on `main`. A hook enforces this rule in the R
 
 ## The pane
 
-The experiments pane lists the records grouped by batch, with each batch's branch. For every record the pane shows its ID, title, status, review, attempt count, latest job id and, for failed or `needs-decision` records, the reason. Records that need you are marked with `!` and highlighted, as are records whose front matter cannot be read. The pane rereads `lab/` every 15 seconds and opens by itself when the terminal is wide enough. Type `/experiments` to open it at any width.
+The experiments pane shows one line per experiment under a header that counts the experiments, says how many need you and names each batch's branch. Each line holds an attention mark `!` when nothing moves until you act, which means a proposal waiting for your approval, a decision, or a record the pane cannot read, an expand marker, the ID and title, the status and one plain fact. That fact is the review state or the verdict once the experiment is finished, the scheduler's state and the latest job while it runs, and the reason while it is `failed` or `needs-decision`. When the scheduler reports that a running record's job has already finished, the line says `record not updated`, so a record the Executor has not caught up with does not look like a stuck job.
+
+Each line is a button. Click a line, or press ctrl+x Tab to move into the pane, pick a line with the arrow keys and press Enter, and the experiment expands in place. The expanded experiment shows its hypothesis, its success criterion, every attempt with its time, job, commit, scheduler outcome and reason, the run directory and log, the verdict when there is one, and what the experiment is waiting on. Pressing the line again collapses it. The pane remembers which lines are expanded for the current session only.
+
+The pane opens by itself when the terminal is wide enough. Type `/experiments` to open it at any width.
 
 The `showPane` option, on by default, controls the pane. Turn it off in `/config`, or at install time with `claude plugin install experiment-conductor@chaord-marketplace --config showPane=false`. The session-start summary and the branch hook stay on either way.
 
+## How the pane is built
+
+The pane is a Claude Code mod written in TypeScript, and its code lives in `hooks/`. The file `hooks/register.tsx` registers the `/experiments` command, starts the timers and draws the pane. Every 15 seconds the pane rereads the records under `lab/`, and `hooks/parse.ts` turns each record into one row. Every 60 seconds, and whenever you expand a line, `hooks/scheduler.ts` asks the scheduler about the jobs the pane shows. The query runs `sacct` for the latest job of each running record and of each failed or `needs-decision` record without a verdict, plus every attempt's job of the expanded lines. Where `sacct` cannot be started, the pane asks `ps` whether each process is still alive. A job that neither command reports keeps the record's status alone. The pane only reads, so it never writes a record and never touches a job.
+
+The text of every line comes from `hooks/rows.ts`, which is the file to change to show other fields. A field the parser does not read yet goes into `hooks/parse.ts` and the row type in `types/index.d.ts` first. The tests in `tests/pane.test.tsx` draw the pane from sample records with a stand-in for `sacct`, and `claude plugin test` runs them.
+
+You may copy and modify the pane, or the whole plugin, under the MIT license.
+
 ## Limits
 
-Experiment Conductor is not autonomous research. Nothing runs without your approval, and only you, or the Researcher with your agreement, decide what a result means. The plugin is not a job scheduler either, because the Executor uses the scheduler you already have, such as SLURM, or plain processes on one machine. The pane shows the status written in the records, and live job state is checked by the Executor at the start of each session. Merging a batch into `main` is always your action.
+Experiment Conductor is not autonomous research. Nothing runs without your approval, and only you, or the Researcher with your agreement, decide what a result means. The plugin is not a job scheduler either, because the Executor uses the scheduler you already have, such as SLURM, or plain processes on one machine. The pane shows what the scheduler reports next to what the records say, and only the Executor corrects a record, at the start of each session or when a job ends. Merging a batch into `main` is always your action.
 
 ## License
 
