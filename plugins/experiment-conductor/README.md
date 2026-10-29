@@ -82,6 +82,24 @@ The text of every line comes from `hooks/rows.ts`, which is the file to change t
 
 You may copy and modify the pane, or the whole plugin, under the MIT license.
 
+## Demo
+
+The script `demo/run-demo.sh` shows both roles working together without any typing. Run it with the name of a SLURM partition, from any directory. Every run uses the same repository folder, `~/ec-demo/project`, because Claude Code asks once for each git repository's path whether to trust it and remembers the answer for that path. Before the first talk, trust that folder once by running `mkdir -p ~/ec-demo/project && cd ~/ec-demo/project && git init -q && claude` and accepting the trust dialog.
+
+```
+sh demo/run-demo.sh <partition>
+sh demo/run-demo.sh -l /path/to/chaord-marketplace/plugins/experiment-conductor <partition>
+sh demo/run-demo.sh -b /path/to/base -m auto <partition>
+```
+
+The first form uses the plugin installed from the marketplace. The second loads a local checkout through `--plugin-dir`. Each run moves the previous run's repository into `runs/` under the base folder and creates a fresh git repository at `project` with one commit on `main`, so each run starts clean, earlier runs are kept and no other project is touched. The script refuses to start while an earlier demo's tmux session is still running, since that session works in the same folder. It then opens a tmux session in that repository with two panes stacked vertically, the Researcher on top and the Executor below. Each pane runs `claude --name <name> --agent experiment-conductor:<role>` with its first prompt already submitted. The `-b BASE` option replaces the default base folder `~/ec-demo`, and the folder to trust is then `project` inside it. The base path and the `-l` path must not contain a double quote, a dollar sign or a backtick. The `-m MODE` option passes `--permission-mode MODE` to both sessions, and without it no such flag is passed. The `-d` option creates the session without attaching to it.
+
+Auto permission mode suits the demo, because the sessions need to send messages, run git and use the scheduler, and the cluster tests of the plugin ran in that mode. In other modes the presenter may need to approve tool prompts during the talk.
+
+The Researcher prompt asks for a dry-run batch of 5 dummy experiments on your partition, with E003 depending on E002 and E004 failing every time. The prompt also states that you approve every record in this batch, so the Researcher can mark each one ready. The two sessions are named after the run, and each prompt gives the name of the other session. The Researcher writes the batch, marks the records ready and messages the Executor session. The Executor runs the jobs and messages the Researcher session each time an experiment is ready for analysis and when the batch is finished. The Researcher analyzes each experiment and writes the batch report. These messages use Claude Code's [cross-session messaging](https://code.claude.com/docs/en/cross-session-messaging.md), which needs Claude Code v2.1.224 or later.
+
+In the experiments pane, the audience sees the five records move from `proposed` to `ready`, then through `running` and `done`, with the review field passing `awaiting-analysis` before a verdict. E003 waits for E002, and E004 shows the failure path with its reason. Messages between the sessions appear as one-line previews in each pane. The tmux session needs a terminal wide enough for the experiments pane to open by itself, and `/experiments` opens it at any width.
+
 ## Limits
 
 Experiment Conductor is not autonomous research. Nothing runs without your approval, and only you, or the Researcher with your agreement, decide what a result means. The plugin is not a job scheduler either, because the Executor uses the scheduler you already have, such as SLURM, or plain processes on one machine. The pane shows what the scheduler reports next to what the records say, and only the Executor corrects a record, at the start of each session or when a job ends. Merging a batch into `main` is always your action.
