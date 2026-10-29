@@ -119,7 +119,7 @@ END {
     print "Batch " b " on branch exp/" b ": " line attn[b]
   }
   if (bad != "") print "Unrecognized records (missing or malformed front matter, or an unknown status):" bad
-  print "Follow the experiment-protocol skill: work on the batch branch, check every running job with the scheduler, and make your first message the status report (what finished, what is running, what comes next, and any stale status you will correct) before changing anything."
+  print "Follow the experiment-protocol skill: work on the batch branch, stop if another Executor is working it, check every running job with the scheduler, and make only the stale-status corrections the rules dictate. Then give the status report (what finished, what is running, what comes next, and the corrections you made) before submitting anything new or deciding anything."
 }
 ' "$@"
 branch_hint

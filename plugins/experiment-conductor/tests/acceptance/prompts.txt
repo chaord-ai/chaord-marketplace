@@ -1,0 +1,49 @@
+# Fixed prompts for run.sh. Each section starts with a line [name] and runs
+# to the next section. run.sh replaces @RESOURCES@ with the section
+# resources-local or resources-slurm, then @PARTITION@ and @BATCH@.
+# Lines before the first section are comments.
+
+[system]
+This session is part of a headless acceptance run of experiment-conductor. Nobody reads your messages until the session ends and nobody can answer a question, so do not ask one; decide by the protocol and say what you decided. Wait for jobs with foreground commands, for example a loop of sleep 10 and a status check inside one Bash call of at most five minutes, never with a background watcher. Do not end the session while a job you submitted is still running or a ready record can still run.
+
+[propose]
+I want to check that the experiment workflow in this project behaves as designed, using the toy trainer train.sh (read its header). Propose exactly the batch below, with no additions and no changes. Use the batch slug acceptance and today's date. Keep the IDs, titles, dependencies, priorities, commands, wall times and success criteria as written, and write a short hypothesis and change vs baseline for each record.
+
+- E001, title "baseline", priority 1, depends on nothing. Train from scratch. Success criterion: accuracy in metrics.json is at least 0.75.
+- E002, title "finetune from baseline", priority 2, depends on E001. Train starting from the model.txt that E001 wrote. Success criterion: accuracy is at least 0.83.
+- E003, title "learning rate 10", priority 1, depends on nothing. Train from scratch with learning rate 10. Success criterion: accuracy is at least 0.80.
+- E004, title "long schedule", priority 1, depends on nothing. Train from scratch for 40 steps. Success criterion: accuracy is at least 0.75.
+
+@RESOURCES@
+
+In each command, <run dir> stands for the run directory the Executor picks for the attempt.
+
+I approve all four records exactly as written, in advance. After you commit the proposal, mark all four records ready, commit that change, and end the session. Do not run anything.
+
+[resources-local]
+This machine has no scheduler. Jobs run as plain background processes from the project root, and the job id is the process id. The wrapper sh bin/with-limit <seconds> <command> runs a command under a wall-time limit and exits 124 when the limit is reached. The commands, with their wall times, are:
+
+- E001: sh bin/with-limit 60 sh train.sh --out <run dir> --steps 8
+- E002: sh bin/with-limit 60 sh train.sh --out <run dir> --steps 8 --init <E001 run dir>/model.txt
+- E003: sh bin/with-limit 60 sh train.sh --out <run dir> --steps 8 --lr 10
+- E004: sh bin/with-limit 20 sh train.sh --out <run dir> --steps 40
+
+[resources-slurm]
+Jobs run on SLURM in the partition @PARTITION@, one CPU and 100 MB each, submitted from the project root with sbatch --wrap. Steps are slower on SLURM, so each command passes --step-seconds 2.5. The commands, with their wall times in minutes, are:
+
+- E001: sbatch --partition=@PARTITION@ --cpus-per-task=1 --mem=100M --time=5 --output=logs/%j.out --wrap "sh train.sh --out <run dir> --steps 8 --step-seconds 2.5"
+- E002: sbatch --partition=@PARTITION@ --cpus-per-task=1 --mem=100M --time=5 --output=logs/%j.out --wrap "sh train.sh --out <run dir> --steps 8 --step-seconds 2.5 --init <E001 run dir>/model.txt"
+- E003: sbatch --partition=@PARTITION@ --cpus-per-task=1 --mem=100M --time=5 --output=logs/%j.out --wrap "sh train.sh --out <run dir> --steps 8 --step-seconds 2.5 --lr 10"
+- E004: sbatch --partition=@PARTITION@ --cpus-per-task=1 --mem=100M --time=1 --output=logs/%j.out --wrap "sh train.sh --out <run dir> --steps 40 --step-seconds 2.5"
+
+[run]
+The batch @BATCH@ is approved and its records are ready. Run it.
+
+[continue]
+Continue.
+
+[report]
+Every job of the batch @BATCH@ has ended. Analyze the batch and complete its README.md as the report. I agree in advance with the verdicts you propose for the records awaiting analysis, so set them. Leave any record that needs a decision as it is and list it under Open questions. Commit the report.
+
+[guard]
+This is a test of the plugin's branch guard, and I am the user asking for it. The repository is checked out on main. I expect the guard hook to block the command and want to see it do so, so run exactly this command once without switching branches, even though the protocol forbids commits on main, and tell me what happened: git commit --allow-empty -m "guard check"
